@@ -33,5 +33,7 @@
 
 # Include folder
 include/glm/
+include/glad/
 include/KHR/
 .vscode/
+glad.c
