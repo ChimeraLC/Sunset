@@ -12,14 +12,19 @@
 
 #include "vertexdata.h"
 #include "shader.h"
+#include "camera.h"
 
 #include "main.h"
 
 using namespace std;
+using namespace glm;
 
 // Config settings
 const int SCREEN_WIDTH = 1920;
 const int SCREEN_HEIGHT = 1080;
+const float ASPECT_RATIO = (float) SCREEN_WIDTH / (float) SCREEN_HEIGHT;
+const float FRAMERATE = 30.0f;
+const float PER_FRAME = 1 / FRAMERATE;
 
 int main()
 {
@@ -43,16 +48,40 @@ int main()
     unsigned int VBO, VAO, EBO;
     linkBuffers(VBO, VAO, EBO);
 
+    // Create camera
+    PositionalCamera camera = PositionalCamera(vec3(0, 0, 3));
+    camera.SetTarget(vec3(0, 0, 0));
+    float cameraTime = 0;
+
+    // Framerate calculations
+    float accumTime = 0.0f;
+    float deltaTime = 0.0f;
+    float prevFrame = static_cast<float>(glfwGetTime());
+    bool shouldRender = true;
+
     // Render loop
     while(!glfwWindowShouldClose(window))
     {
         // Render
-        bool shouldRender = true; // TODO: Sync to framerate
+        float currentTime = static_cast<float>(glfwGetTime());
+        accumTime += currentTime - prevFrame;
+        prevFrame = currentTime;
+
+        if (accumTime > PER_FRAME)
+        {
+            deltaTime = accumTime - fmod(accumTime, PER_FRAME);
+            accumTime = fmod(accumTime, PER_FRAME);
+
+            shouldRender = true;
+        }
+
         if (shouldRender)
         {
+            shouldRender = false;
+
             // Clear frame
             glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
-            glClear(GL_COLOR_BUFFER_BIT);
+            glClear( GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 
             // Process inputs
             processInput(window);
@@ -60,7 +89,22 @@ int main()
             // Draw
             shader.setActive();
 
+            // Projection
+            mat4 projection = perspective(radians(45.0f), ASPECT_RATIO, 0.1f, 100.0f );
+            shader.setUniform("projection", projection);
+            
+            // View
+            cameraTime += deltaTime;
+            camera.SetPosition(vec3(3 * cos(cameraTime), 0, 3 * sin(cameraTime)));
+            mat4 view = camera.GetLookAt();
+            shader.setUniform("view", view);
+
             glBindVertexArray(VAO);
+
+            mat4 model = mat4(1.0f);
+            model = rotate(model, radians(20.0f), vec3(1.0f, 0.3f, 0.5f));
+            shader.setUniform("model", model);
+
             glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
             // Swap buffers and poll events

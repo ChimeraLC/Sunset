@@ -5,9 +5,13 @@
 #include <sstream>
 #include <string>
 
+#include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
 #include "shader.h"
 
 using namespace std;
+using namespace glm;
 
 Shader::Shader(string vertexPath, string fragmentPath)
 {
@@ -119,4 +123,11 @@ void Shader::setUniform(const string name, float value) const
 {
     int uniformLocation = glGetUniformLocation(shaderProgram, name.c_str());
     glUniform1f(uniformLocation, value);
+}
+
+
+void Shader::setUniform(const string name, mat4 value) const
+{
+    int uniformLocation = glGetUniformLocation(shaderProgram, name.c_str());
+    glUniformMatrix4fv(uniformLocation, 1, GL_FALSE, value_ptr(value));
 }

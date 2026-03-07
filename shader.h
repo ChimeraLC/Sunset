@@ -1,5 +1,9 @@
 #include <string>
+
+#include <glm/glm.hpp>
+
 using namespace std;
+using namespace glm;
 
 class Shader
 {
@@ -14,6 +18,7 @@ class Shader
         void setUniform(const string name, bool value) const;
         void setUniform(const string name, int value) const;
         void setUniform(const string name, float value) const;
+        void setUniform(const string name, mat4 value) const;
 
     private:
         unsigned int shaderProgram;
