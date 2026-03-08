@@ -5,7 +5,11 @@ using namespace std;
 
 // Initialization
 GLFWwindow* initializeAndCreateWindow(int screenWidth, int screenHeight, const char* windowName);
-unsigned int linkBuffers(unsigned int& VBO, unsigned int& VAO, unsigned int& EBO);
+
+unsigned int genBuffers(int bufferCount, unsigned int (&VBOs)[], unsigned int (&VAOs)[], unsigned int (&EBOs)[]);
+
+unsigned int bindBuffer(int bufferIndex, unsigned int (&VBOs)[], unsigned int (&VAOs)[], 
+        unsigned int (&EBOs)[], vector<float> vertices, vector<int> indices);
 
 // Pipeline
 void processInput(GLFWwindow* window);

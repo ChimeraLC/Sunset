@@ -5,12 +5,13 @@
 #include <iostream>
 #include <cmath>
 #include <string>
+#include <vector>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-#include "vertexdata.h"
+#include "model.h"
 #include "shader.h"
 #include "camera.h"
 
@@ -18,6 +19,9 @@
 
 using namespace std;
 using namespace glm;
+
+// Debug Settings
+
 
 // Config settings
 const int SCREEN_WIDTH = 1920;
@@ -32,7 +36,7 @@ int main()
     GLFWwindow* window = initializeAndCreateWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Sunset");
     if (!window)
     {
-        std::cerr << "Error when setting up window" << std::endl;
+        cerr << "Error when setting up window" << endl;
         return -1;
     }
 
@@ -40,18 +44,44 @@ int main()
     Shader shader = Shader("shaders/flatShader.vs", "shaders/flatShader.fs");
     if (!shader.isValid)
     {
-        std::cerr << "Error when compiling shaders" << std::endl;
+        cerr << "Error when compiling shaders" << endl;
         return -1;
     }
 
-    // Vertex buffers
-    unsigned int VBO, VAO, EBO;
-    linkBuffers(VBO, VAO, EBO);
+    // TODO: How is buffer count generated?
+    int bufferCount = 2;
+    unsigned int VBOs[bufferCount], VAOs[bufferCount], EBOs[bufferCount];
+    vector<int> triangleCounts;
+
+    genBuffers(bufferCount, VBOs, VAOs, EBOs);
+
+    // Generate models TODO: Currently just one
+    for (int i = 0; i < bufferCount; i++)
+    {
+        // TODO: Do I need to be worred about gc?
+        vector<float> vertices;
+        vector<int> indices;
+        int triangleCount;
+
+        if (!createModel(i, vertices, indices, triangleCount))
+        {
+            cerr << "Error when generating model " << i << endl;
+            return -1;
+        }
+
+        triangleCounts.push_back(triangleCount);
+        bindBuffer(i, VBOs, VAOs, EBOs, vertices, indices);
+    }
 
     // Create camera
-    PositionalCamera camera = PositionalCamera(vec3(0, 0, 3));
+    PositionalCamera camera = PositionalCamera(vec3(0, 2, 3));
     camera.SetTarget(vec3(0, 0, 0));
     float cameraTime = 0;
+
+    vec3 lightPosition = vec3(3, 3, 4);
+
+    // Set settings
+    glEnable(GL_DEPTH_TEST);  
 
     // Framerate calculations
     float accumTime = 0.0f;
@@ -94,18 +124,32 @@ int main()
             shader.setUniform("projection", projection);
             
             // View
-            cameraTime += deltaTime;
-            camera.SetPosition(vec3(3 * cos(cameraTime), 0, 3 * sin(cameraTime)));
+            cameraTime += deltaTime / 3;
+            camera.SetPosition(vec3(3 * cos(cameraTime), 2, 3 * sin(cameraTime)));
             mat4 view = camera.GetLookAt();
             shader.setUniform("view", view);
 
-            glBindVertexArray(VAO);
+            for (int i = 0; i < bufferCount; i++)
+            {
+                glBindVertexArray(VAOs[i]);
 
-            mat4 model = mat4(1.0f);
-            model = rotate(model, radians(20.0f), vec3(1.0f, 0.3f, 0.5f));
-            shader.setUniform("model", model);
+                // TODO: Get model transform based on model
+                mat4 model = mat4(1.0f);
+                shader.setUniform("model", model);
 
-            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+                mat3 normMat = mat3(transpose(inverse(model)));
+                shader.setUniform("normMatrix", normMat);
+
+                // Color? Texture or flat
+                shader.setUniform("baseColor", vec3(0.6f * i, 0.3f, 0.0f));
+                shader.setUniform("lightColor", vec3(1.0f, 1.0f, 1.0f));
+                shader.setUniform("lightPos", lightPosition);
+                
+
+                // Get triangle count based on model
+                glDrawElements(GL_TRIANGLES, 3 * triangleCounts[i], 
+                        GL_UNSIGNED_INT, 0);
+            }
 
             // Swap buffers and poll events
             glfwSwapBuffers(window);
@@ -114,8 +158,8 @@ int main()
     }
 
     // Deallocate
-    glDeleteVertexArrays(1, &VAO);
-    glDeleteBuffers(1, &VBO);
+    glDeleteVertexArrays(bufferCount, VAOs);
+    glDeleteBuffers(bufferCount, VBOs);
     shader.deleteProgram();
 
     glfwTerminate();
@@ -156,29 +200,34 @@ GLFWwindow* initializeAndCreateWindow(int screenWidth, int screenHeight, const c
     return window;
 }
 
-// TODO: vertices input in main, and not hardcoded
-unsigned int linkBuffers(unsigned int& VBO, unsigned int& VAO, unsigned int& EBO)
+unsigned int genBuffers(int bufferCount, unsigned int (&VBOs)[], unsigned int (&VAOs)[], unsigned int (&EBOs)[])
 {
-    glGenBuffers(1, &VBO);
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);    
-    
-    glGenVertexArrays(1, &VAO);
-    glBindVertexArray(VAO);
+    glGenBuffers(bufferCount, VBOs);  
+    glGenVertexArrays(bufferCount, VAOs);
+    glGenBuffers(bufferCount, EBOs);
 
-    glGenBuffers(1, &EBO);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+    return 1;
+}
 
-    // TODO: Formalize this somehow
+unsigned int bindBuffer(int bufferIndex, unsigned int (&VBOs)[], unsigned int (&VAOs)[], 
+        unsigned int (&EBOs)[], vector<float> vertices, vector<int> indices)
+{
+    glBindVertexArray(VAOs[bufferIndex]);
+    glBindBuffer(GL_ARRAY_BUFFER, VBOs[bufferIndex]);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[bufferIndex]);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(vertices), &vertices[0], GL_STATIC_DRAW);  
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(indices), &indices[0], GL_STATIC_DRAW);
+
+    // Position data
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
+    // Texture / UV data
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindVertexArray(0);
+    // glBindBuffer(GL_ARRAY_BUFFER, 0);
+    // glBindVertexArray(0);
 
     return 1;
 }

@@ -3,7 +3,7 @@ CFLAGS  = -I include -Wall -Wextra -Werror
 EFLAGS = -lglfw3 -lopengl32 -lgdi32
 
 PROG = sunset
-OBJS = main.cpp shader.cpp glad.c
+OBJS = main.cpp shader.cpp model.cpp glad.c
 
 build: ${PROG}
 

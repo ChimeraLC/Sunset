@@ -125,6 +125,22 @@ void Shader::setUniform(const string name, float value) const
     glUniform1f(uniformLocation, value);
 }
 
+void Shader::setUniform(const string name, vec3 value) const
+{
+    int uniformLocation = glGetUniformLocation(shaderProgram, name.c_str());
+    glUniform3f(uniformLocation, value.x, value.y, value.z);
+}
+void Shader::setUniform(const string name, vec4 value) const
+{
+    int uniformLocation = glGetUniformLocation(shaderProgram, name.c_str());
+    glUniform4f(uniformLocation, value.x, value.y, value.z, value.w);
+}
+
+void Shader::setUniform(const string name, mat3 value) const
+{
+    int uniformLocation = glGetUniformLocation(shaderProgram, name.c_str());
+    glUniformMatrix3fv(uniformLocation, 1, GL_FALSE, value_ptr(value));
+}
 
 void Shader::setUniform(const string name, mat4 value) const
 {
