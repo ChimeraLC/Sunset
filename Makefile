@@ -11,4 +11,4 @@ ${PROG}: ${OBJS}
 	${CC} ${CFLAGS} -o $@ ${OBJS} ${EFLAGS}
 
 clean:
-	rm -f *.o main
+	rm -f *.o sunset
