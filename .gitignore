@@ -37,3 +37,4 @@ include/glad/
 include/KHR/
 .vscode/
 glad.c
+MakefileOld

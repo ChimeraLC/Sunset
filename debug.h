@@ -1,6 +1,7 @@
 enum Option {
     DEBUG_DRAW_NORMS = 0x01,
     DEBUG_FRAMERATE = 0x02,
+    DEBUG_FREEHAND_CAMERA = 0x04,
 };
 
 unsigned int options;

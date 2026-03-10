@@ -22,8 +22,6 @@
 using namespace std;
 using namespace glm;
 
-// Debug Settings (TODO)
-
 // Config settings
 const int SCREEN_WIDTH = 1920;
 const int SCREEN_HEIGHT = 1080;
@@ -33,7 +31,7 @@ const float ASPECT_RATIO = (float) SCREEN_WIDTH / (float) SCREEN_HEIGHT;
 const float FRAMERATE = 30.0f;
 const float PER_FRAME = 1 / FRAMERATE;
 
-const int SHADOW_RESOLUTION = 512;
+const int SHADOW_RESOLUTION = 1024;
 
 const float COLOR_WHITE[] = {1.0, 1.0, 1.0, 1.0};
 
@@ -41,6 +39,12 @@ const float COLOR_WHITE[] = {1.0, 1.0, 1.0, 1.0};
 const int bufferCount = 2;
 unsigned int VAOs[bufferCount];
 vector<int> triangleCounts;
+vector<ModelData> modelDatas;
+
+Camera* camera;
+float mouseX;
+float mouseY;
+bool mouseSet;
 
 int main(int argc, char *argv[])
 {
@@ -86,21 +90,28 @@ int main(int argc, char *argv[])
         vector<float> vertices;
         vector<int> indices;
         int triangleCount;
+        ModelData modelData;
 
-        if (!createModel(i, vertices, indices, triangleCount))
+        if (!createModel(i, vertices, indices, modelData, triangleCount))
         {
             cerr << "Error when generating model " << i << endl;
             return -1;
         }
 
         triangleCounts.push_back(triangleCount);
+        modelDatas.push_back(modelData);
         bindBuffer(i, VBOs, VAOs, EBOs, vertices, indices);
     }
 
     // Create camera
-    PositionalCamera camera = PositionalCamera(vec3(0, 2, 3));
-    camera.SetTarget(vec3(0, 0, 0));
-    float cameraTime = 0;
+    if (DebugActive(DEBUG_FREEHAND_CAMERA))
+    {
+        camera = new FreeCamera(vec3(-2, 0.5f, 0), 0, 0);
+    }
+    else
+    {
+        camera = new FixedCamera(vec3(0, 2, 3));
+    }
 
     vec3 sunPosition = vec3(3, 3, 4);
     vec3 lightDirection = -sunPosition;
@@ -110,7 +121,7 @@ int main(int argc, char *argv[])
 
     // Light view matrix (currently, this doesn't change)
     mat4 lightProjection, lightView, lightViewMatrix;
-    lightProjection = ortho(-10.0f, 10.0f, -10.0f, 10.0f, nearPlane, farPlane);
+    lightProjection = ortho(-1.0f, 1.0f, -1.0f, 1.0f, nearPlane, farPlane);
     lightView = lookAt(sunPosition, vec3(0.0f), vec3(0.0, 1.0, 0.0));
     lightViewMatrix = lightProjection * lightView;
 
@@ -140,6 +151,7 @@ int main(int argc, char *argv[])
 
             if (DebugActive(DEBUG_FRAMERATE))
             {
+                // TODO: Debug actual framerate
                 if (deltaTime > PER_FRAME)
                 {
                     cout << "Skipped " << deltaTime / PER_FRAME - 1 << " frame(s)" << endl;
@@ -158,6 +170,7 @@ int main(int argc, char *argv[])
 
             // Process inputs
             processInput(window);
+            camera->ProcessInput(window, deltaTime);
 
             // Depth buffer render
             depthShader.setActive();
@@ -180,9 +193,7 @@ int main(int argc, char *argv[])
             shader.setUniform("projection", projection);
             
             // View
-            cameraTime += deltaTime / 3;
-            camera.SetPosition(vec3(3 * cos(cameraTime), 2, 3 * sin(cameraTime)));
-            mat4 view = camera.GetLookAt();
+            mat4 view = camera->GetLookAt();
             shader.setUniform("view", view);
 
             glViewport(0, 0, curWidth, curHeight);
@@ -214,8 +225,11 @@ void render(Shader shader, bool usesNorm, bool usesColor)
 
         glBindVertexArray(VAOs[i]);
 
+        ModelData modelData = modelDatas[i];
+
         // TODO: Get model transform based on model
         mat4 model = mat4(1.0f);
+        model = translate(model, modelData.translation);
         shader.setUniform("model", model);
 
         if (usesNorm)
@@ -227,7 +241,7 @@ void render(Shader shader, bool usesNorm, bool usesColor)
         // Color? Texture or flat
         if (usesColor)
         {
-            shader.setUniform("baseColor", vec3(0.6f * i, 0.3f, 0.0f));
+            shader.setUniform("baseColor", modelData.color);
             shader.setUniform("lightColor", vec3(1.0f, 1.0f, 1.0f));
         }
 
@@ -242,6 +256,28 @@ void processInput(GLFWwindow* window)
 {
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
+}
+
+void mouseCallback(GLFWwindow* window, double xPosD, double yPosD)
+{
+    (void) window; 
+    float xPos = static_cast<float>(xPosD);
+    float yPos = static_cast<float>(yPosD);
+
+    if (!mouseSet)
+    {
+        mouseX = xPos;
+        mouseY = yPos;
+        mouseSet = true;
+    }
+
+    float xChange = xPos - mouseX;
+    float yChange = mouseY - yPos;
+
+    mouseX = xPos;
+    mouseY = yPos;
+
+    camera->ProcessMouse(xChange, yChange);
 }
 
 GLFWwindow* initializeAndCreateWindow(int screenWidth, int screenHeight, const char* windowName)
@@ -260,7 +296,9 @@ GLFWwindow* initializeAndCreateWindow(int screenWidth, int screenHeight, const c
         return nullptr;
     }
     glfwMakeContextCurrent(window);
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
+    glfwSetCursorPosCallback(window, mouseCallback);
 
     // Initialize GLAD
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
@@ -339,13 +377,16 @@ void framebufferSizeCallback(GLFWwindow* window, int newWidth, int newHeight)
 unsigned int handleArgs(int argc, char*argv[])
 {
     int c;
-    while ((c = getopt(argc, argv, "nfh")) != -1) {
+    while ((c = getopt(argc, argv, "nfch")) != -1) {
         switch (c) {
             case 'n': 
                 SetDebug(DEBUG_DRAW_NORMS);
                 break;
             case 'f':
                 SetDebug(DEBUG_FRAMERATE); 
+                break;
+            case 'c':
+                SetDebug(DEBUG_FREEHAND_CAMERA);
                 break;
             // TODO: Command line argument to set framerate
             case 'h':
@@ -366,4 +407,5 @@ void displayHelp()
     cout << "   options:" << endl;
     cout << "      -n draw normals" << endl;
     cout << "      -f enable framerate debug" << endl;
+    cout << "      -c enable full camera control" << endl;
 }

@@ -13,11 +13,12 @@ uniform vec3 lightColor;
 uniform vec3 lightDir;
 uniform vec3 camPos;
 
-float shadowCalc(vec3 inFragLightPos)
+// TODO: Fix aliasing on oblique surfaces
+float shadowCalc(vec3 inFragLightPos, vec3 norm)
 {
     vec3 depthCoords = inFragLightPos * 0.5 + 0.5;
     float currentDepth = depthCoords.z;
-    float shadowSmooth = 0.0075f;
+    float shadowSmooth = 0.0025f;
 
     if (currentDepth > 1.0)
         return 0.0;
@@ -72,7 +73,7 @@ void main()
     }  
 
     // Check if in shadow
-    float shadowCoef = shadowCalc(fragLightPos);
+    float shadowCoef = shadowCalc(fragLightPos, norm);
     
     vec3 result = (ambientCoef + (1.0 - shadowCoef) * (diffuseCoef + specCoef)) * lightColor * baseColor;
     fragColor = vec4(result, 1.0);

@@ -2,20 +2,26 @@
 
 #include <vector>
 #include <tuple>
+#include <random>
+#include <iostream>
+
+#include "consts.h"
 
 #include "model.h"
 
 using namespace glm;
 using namespace std;
 
-unsigned int createModel(int index, vector<float>& vertices, vector<int>& indices, int& triangleCount) {
+
+unsigned int createModel(int index, vector<float>& vertices, vector<int>& indices, 
+    ModelData& modelData, int& triangleCount) {
     switch (index)
     {
         case 0:
-            createModelGround(vertices, indices, triangleCount);
+            createModelGround(vertices, indices, modelData, triangleCount);
             break;
         case 1:
-            createModelTrunk(vertices, indices, triangleCount);
+            createModelTrunk(vertices, indices, modelData, triangleCount);
             break;
         default:
             return 0;
@@ -23,7 +29,12 @@ unsigned int createModel(int index, vector<float>& vertices, vector<int>& indice
     return 1;
 }
 
-void createModelGround(vector<float>& vertices, vector<int>& indices, int& triangleCount) {
+float randFloat() {
+    return ((float) rand()) / RAND_MAX;    
+}
+
+void createModelGround(vector<float>& vertices, vector<int>& indices, 
+    ModelData& modelData, int& triangleCount) {
     vertices = {
             1.0, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f,
             1.0, 0.0f, -1.0f, 0.0f, 1.0f, 0.0f,
@@ -37,34 +48,15 @@ void createModelGround(vector<float>& vertices, vector<int>& indices, int& trian
         };
 
     triangleCount = 2;
-}
-
-void createModelTrunk(vector<float>& vertices, vector<int>& indices, int& triangleCount) {
-
-    triangleCount = 4;
-    
-    vector<float> preVertices = {
-            0.5f, 0.0f, 0.5f, 
-            0.5f, 0.0f, -0.5f, 
-            -0.5f, 0.0f, -0.5f, 
-            -0.5f, 0.0f, 0.5f, 
-            0.0f, 1.0f, 0.0f, 
-    };
-
-    vector<int> preIndices = {
-        0, 1, 4,
-        1, 2, 4,
-        2, 3, 4,
-        3, 0, 4
-    };
-
-    fillVertexNormals(preVertices, preIndices, vertices, indices, triangleCount);
+    modelData.color = vec3(0.0f, 0.3f, 0.0f);
 }
 
 void fillVertexNormals(vector<float> const& preVertices, 
         vector<int> const& preIndices,
         vector<float>& vertices, vector<int>& indices,
-        int triangleCount) {
+        int& triangleCount) {
+
+    triangleCount = preIndices.size() / 3;
 
     for (int i = 0; i < triangleCount; i++)
     {
@@ -100,3 +92,148 @@ vec3 getNormal(const float* point1, const float* point2, const float* point3)
     vec3 side2 = vec3(point3[0] - point2[0], point3[1] - point2[1], point3[2] - point2[2]);
     return normalize(cross(side1, side2));
 }
+
+void pushTriangle(vector<float>& vertices, float x, float y, float z)
+{
+    vertices.push_back(x);
+    vertices.push_back(y);
+    vertices.push_back(z);
+}
+void pushTriangle(vector<float>& vertices, vec3 newPoint)
+{
+    vertices.push_back(newPoint.x);
+    vertices.push_back(newPoint.y);
+    vertices.push_back(newPoint.z);
+}
+
+void pushIndices(vector<int>& indices, int index1, int index2, int index3)
+{
+    indices.push_back(index1);
+    indices.push_back(index2);
+    indices.push_back(index3);
+}
+
+void displayValues(vector<float>& preVertices, vector<int>& preIndices)
+{
+    std::cout << "\nVertices:" << endl;
+    for (int i = 0; i < (int) preVertices.size(); i++)
+    {
+        if (i > 0 && i % 3 == 0)
+            std::cout << std::endl;
+        std::cout << preVertices[i] << ", ";
+    }
+    std::cout << "\nIndices:" << endl;
+    for (int i = 0; i < (int) preIndices.size(); i++)
+    {
+        if (i > 0 && i % 3 == 0)
+            std::cout << std::endl;
+        std::cout << preIndices[i] << ", ";
+    }
+}
+
+// ████████╗██████╗ ███████╗███████╗
+// ╚══██╔══╝██╔══██╗██╔════╝██╔════╝
+//    ██║   ██████╔╝█████╗  █████╗  
+//    ██║   ██╔══██╗██╔══╝  ██╔══╝  
+//    ██║   ██║  ██║███████╗███████╗
+//    ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝
+
+// Creates a tree ring of points; returns start point of the ring
+// Currently is not orriented any way
+int createTreeRing(vec3 ringCenter, float radius, int sides, vector<float>& vertices)
+{
+    int startIndex = vertices.size() / 3;
+
+    float angle = -2 * PI / sides; // Wind clockwise
+    for (int i = 0; i < sides; i++)
+    {
+        vec3 offset = radius * vec3(cos(angle * i), 0, sin(angle * i));
+        pushTriangle(vertices, ringCenter + offset);
+    }
+
+    return startIndex;
+}
+
+// Adds the necessary triangles to connect two tree rings
+// Currently assumes sides and orrentation is the same
+void connectTreeRings(int indexA, int indexB, int sides,
+        vector<int>& indices)
+{
+    for (int i = 0; i < sides; i++)
+    {
+        int left = i;
+        int right = (i + 1) % sides;
+        pushIndices(indices, indexA + left, indexA + right, indexB + left);
+        pushIndices(indices, indexA + right, indexB + right, indexB + left);
+    }
+}
+
+//Ends off a tree branch; should work the same as connectTreeRings with sidesB = 1
+// Index A is a ring, index B is a single point
+void capBranch(vec3 branchEnd, int indexA, int sides,
+        vector<float>&vertices, vector<int>& indices)
+{
+    int startIndex = vertices.size() / 3;
+
+    pushTriangle(vertices, branchEnd);
+
+    for (int i = 0; i < sides; i++)
+    {
+        int left = i;
+        int right = (i + 1) % sides;
+        pushIndices(indices, indexA + left, indexA + right, startIndex);
+    }
+}
+
+// // Splits a ring into two branch points
+// void splitTreeRing(int index, int& outIndexA, int& outIndexB, int sides,
+//     vector<float>&vertices, vector<int>& indices)
+// {
+// }
+
+void createModelTrunk(vector<float>& vertices, vector<int>& indices, 
+    ModelData& modelData, int& triangleCount) {
+
+    modelData.color = vec3(0.6f, 0.3f, 0.0f);
+
+    int sides = 7;
+
+    vector<float> preVertices;
+    vector<int> preIndices;
+
+    int indexA = createTreeRing(vec3(0), 0.1f, sides, preVertices);
+    int indexB = createTreeRing(vec3(0, 0.3, 0), 0.08f, sides, preVertices);
+    int indexC = createTreeRing(vec3(0, 0.5, 0), 0.05f, sides, preVertices);
+    connectTreeRings(indexA, indexB, sides, preIndices);
+    connectTreeRings(indexB, indexC, sides, preIndices);
+    capBranch(vec3(0.1f, 0.6f, 0.0f), indexC, sides, preVertices, preIndices);
+    
+    fillVertexNormals(preVertices, preIndices, vertices, indices, triangleCount);
+}
+
+    // preVertices = {
+    //         0.3f, 0.0f, 0.3f, 
+    //         0.3f, 0.0f, -0.3f, 
+    //         -0.3f, 0.0f, -0.3f, 
+    //         -0.3f, 0.0f, 0.3f, 
+    //         0.25f, 0.5f, 0.25f, 
+    //         0.25f, 0.5f, -0.25f, 
+    //         -0.25f, 0.5f, -0.25f, 
+    //         -0.25f, 0.5f, 0.25f, 
+    //         0.0f, 1.0f, 0.0f, 
+    // };
+
+    // preIndices = {
+    //     0, 1, 4,
+    //     1, 5, 4,
+    //     1, 2, 5,
+    //     2, 6, 5,
+    //     2, 3, 6,
+    //     3, 7, 6,
+    //     3, 0, 7,
+    //     0, 4, 7,
+    //     4, 5, 8,
+    //     5, 6, 8,
+    //     6, 7, 8,
+    //     7, 4, 8
+    // };
