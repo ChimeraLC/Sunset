@@ -10,6 +10,7 @@ enum ModelType {
 struct ModelData {
 	glm::vec3 color;
 	glm::vec3 translation = glm::vec3(0);
+	glm::vec4 rotation = glm::vec4(0); // Rotation angle stored in w
 	unsigned int modelType = 0;
 };
 
@@ -25,7 +26,9 @@ void fillVertexNormals(std::vector<float> const& preVertices,
 
 void createModelGround(std::vector<float>& vertices, std::vector<int>& indices, 
 	ModelData& modelData, int& triangleCount);
-void createModelTrunk(std::vector<float>& vertices, std::vector<int>& indices, 
+void createModelSun(std::vector<float>& vertices, std::vector<int>& indices, 
 	ModelData& modelData, int& triangleCount);
+void createModelTrunk(std::vector<float>& vertices, std::vector<int>& indices, 
+	ModelData& modelData, int& triangleCount, glm::vec3 offset);
 
 glm::vec3 getNormal(const float* point1, const float* point2, const float* point3);

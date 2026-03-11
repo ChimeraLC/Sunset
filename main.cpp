@@ -7,6 +7,7 @@
 #include <cmath>
 #include <string>
 #include <vector>
+#include <format>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -28,15 +29,20 @@ const int SCREEN_HEIGHT = 1080;
 int curWidth = SCREEN_WIDTH;
 int curHeight = SCREEN_HEIGHT;
 const float ASPECT_RATIO = (float) SCREEN_WIDTH / (float) SCREEN_HEIGHT;
-const float FRAMERATE = 30.0f;
+const float FRAMERATE = 60.0f;
 const float PER_FRAME = 1 / FRAMERATE;
 
-const int SHADOW_RESOLUTION = 1024;
+const int SHADOW_RESOLUTION = 512;
 
 const float COLOR_WHITE[] = {1.0, 1.0, 1.0, 1.0};
+const float COLOR_BLACK[] = {0.0, 0.0, 0.0, 1.0};
+vec3 sunDirection = vec3(0, 1, 0);
+mat4 sunTransform = mat4(1.0);
+float sunShadowDist = 5;    // Distance shadowmap is rendered from
+float sunRenderDist = 15;   // Distance sun model is rendered
 
 // Global values
-const int bufferCount = 2;
+const int bufferCount = 4;
 unsigned int VAOs[bufferCount];
 vector<int> triangleCounts;
 vector<ModelData> modelDatas;
@@ -53,6 +59,16 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    if (DebugActive(DEBUG_VERBOSE))
+    {
+        cout << "Running with verbose logs" << endl;
+        cout << "Screen size set to: " << SCREEN_WIDTH << "x" << SCREEN_HEIGHT << endl;
+        cout << "Shadowmap resolution set to: " << SHADOW_RESOLUTION << endl;
+        cout << "Framerate set to: " << FRAMERATE << endl;
+        cout << "Model count: " << bufferCount << endl;
+    }
+
+    PrintLog("Initializing module and window");
     // Initialize modules and setup Window
     GLFWwindow* window = initializeAndCreateWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Sunset");
     if (!window)
@@ -61,29 +77,47 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    PrintLog("Initializing shaders");
     // Shaders
-    Shader shader = Shader("shaders/flatShader.vs", 
-        DebugActive(DEBUG_DRAW_NORMS) ? "shaders/normShader.fs" : "shaders/flatShader.fs");
-    if (!shader.isValid)
-    {
+    Shader shader = Shader("shaders/base/flatShader.vs", 
+        DebugActive(DEBUG_DRAW_NORMS) ? "shaders/base/normShader.fs" : "shaders/base/flatShader.fs");
+    if (!shader.isValid) {
         cerr << "Error when compiling base shader" << endl;
-        return -1;
-    }
+        return -1; }
 
-    Shader depthShader = Shader("shaders/depthShader.vs", "shaders/depthShader.fs");
-    if (!depthShader.isValid)
-    {
+    Shader sunShader = Shader("shaders/sun/sunShader.vs", "shaders/sun/sunShader.fs");
+    if (!sunShader.isValid) {
+        cerr << "Error when compiling sun shader" << endl;
+        return -1; }
+
+    Shader occlusionShader = Shader("shaders/occlusion/occlusionShader.vs", "shaders/occlusion/occlusionShader.fs");
+    if (!occlusionShader.isValid) {
+        cerr << "Error when compiling sun shader" << endl;
+        return -1; }
+
+    Shader depthShader = Shader("shaders/depth/depthShader.vs", "shaders/depth/depthShader.fs");
+    if (!depthShader.isValid) {
         cerr << "Error when compiling depth shader" << endl;
-        return -1;
-    }
+        return -1; }
 
     // TODO: How is buffer count generated?
     unsigned int VBOs[bufferCount], EBOs[bufferCount];
-    unsigned int depthFBO, depthMap;
+    unsigned int depthFBO, depthMap, occlusionFBO, occlusionMap;
 
-    genBuffers(bufferCount, VBOs, VAOs, EBOs, depthFBO, depthMap);
+    PrintLog("Generating buffers");
+    genBuffers(bufferCount, VBOs, VAOs, EBOs, depthFBO, depthMap, occlusionFBO, occlusionMap);
 
-    // Generate models TODO: Currently just one
+    PrintLog("Generating models");
+
+    // Generic scene info
+    sunDirection = normalize(vec3(3, 0.01, 4));
+    vec3 lightDirection = -sunDirection;
+    sunTransform = mat4(1.0f);
+    vec3 sunPosition = sunDirection * sunRenderDist;
+    sunTransform = translate(sunTransform, sunPosition);
+    sunTransform *= inverse(lookAt(lightDirection, sunDirection, vec3(0, 1, 0)));
+
+    // Individual models
     for (int i = 0; i < bufferCount; i++)
     {
         // TODO: Do I need to be worred about gc?
@@ -103,6 +137,7 @@ int main(int argc, char *argv[])
         bindBuffer(i, VBOs, VAOs, EBOs, vertices, indices);
     }
 
+    PrintLog("Creating camera");
     // Create camera
     if (DebugActive(DEBUG_FREEHAND_CAMERA))
     {
@@ -113,16 +148,13 @@ int main(int argc, char *argv[])
         camera = new FixedCamera(vec3(0, 2, 3));
     }
 
-    vec3 sunPosition = vec3(3, 3, 4);
-    vec3 lightDirection = -sunPosition;
-
     // TODO: Calculate close and far planes based on model and sun
     float nearPlane = 1.0f, farPlane = 10.0f;
 
     // Light view matrix (currently, this doesn't change)
     mat4 lightProjection, lightView, lightViewMatrix;
     lightProjection = ortho(-1.0f, 1.0f, -1.0f, 1.0f, nearPlane, farPlane);
-    lightView = lookAt(sunPosition, vec3(0.0f), vec3(0.0, 1.0, 0.0));
+    lightView = lookAt(sunDirection * sunShadowDist, vec3(0.0f), vec3(0.0, 1.0, 0.0));
     lightViewMatrix = lightProjection * lightView;
 
     // Set settings
@@ -136,6 +168,7 @@ int main(int argc, char *argv[])
     float prevFrame = static_cast<float>(glfwGetTime());
     bool shouldRender = true;
 
+    PrintLog("Beginning Render Loop");
     // Render loop
     while(!glfwWindowShouldClose(window))
     {
@@ -166,40 +199,74 @@ int main(int argc, char *argv[])
             shouldRender = false;
 
             // Clear frame
-            glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
 
             // Process inputs
             processInput(window);
             camera->ProcessInput(window, deltaTime);
 
             // Depth buffer render
-            depthShader.setActive();
-            depthShader.setUniform("lightView", lightViewMatrix);
             glViewport(0, 0, SHADOW_RESOLUTION, SHADOW_RESOLUTION);
             glBindFramebuffer(GL_FRAMEBUFFER, depthFBO);
             glClear(GL_DEPTH_BUFFER_BIT);
             
+            depthShader.setActive();
+            depthShader.setUniform("lightView", lightViewMatrix);
+            
             // TODO: Peter panning?
-            render(depthShader, false, false);
+            // No need to render sun for shadowmap
+            render(depthShader, 0, MODEL_DEFAULT);
+
+            // Projection and view
+            mat4 projection = perspective(radians(45.0f), ASPECT_RATIO, 0.1f, 100.0f );
+            mat4 view = camera->GetLookAt();
+            vec4 sunScreenPrePos = projection * view * vec4(sunPosition, 1.0);
+            vec3 sunScreenPos = vec3(sunScreenPrePos) / sunScreenPrePos.w;
+            sunScreenPos = sunScreenPos * 0.5f + 0.5f;
+
+            // Bind occlusion buffer
+            glViewport(0, 0, curWidth, curHeight);
+            glBindFramebuffer(GL_FRAMEBUFFER, occlusionFBO);
+            glClearColor(COLOR_BLACK[0], COLOR_BLACK[1], COLOR_BLACK[2], COLOR_BLACK[3]);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+            occlusionShader.setActive();
+            occlusionShader.setUniform("view", view);
+            occlusionShader.setUniform("projection", projection);
+
+            render(occlusionShader, RENDER_LIGHTOCCLUSION);
+
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, depthMap);
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, occlusionMap);
+                    
+            //Bind main texture
+            glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
+            glViewport(0, 0, curWidth, curHeight);
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
             // Main render
             shader.setActive();
             shader.setUniform("shadowMap", 0);
+            shader.setUniform("occlusionMap", 1);
             shader.setUniform("lightView", lightViewMatrix);
             shader.setUniform("lightDir", lightDirection);
+            shader.setUniform("lightScreenPos", sunScreenPos);
             
             // Projection
-            mat4 projection = perspective(radians(45.0f), ASPECT_RATIO, 0.1f, 100.0f );
             shader.setUniform("projection", projection);
             
             // View
-            mat4 view = camera->GetLookAt();
             shader.setUniform("view", view);
 
-            glViewport(0, 0, curWidth, curHeight);
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-            render(shader, true, true);
+            render(shader, RENDER_NORM | RENDER_COLOR, MODEL_DEFAULT);
+
+            // Sun render
+            sunShader.setActive();
+            sunShader.setUniform("projection", projection);
+            sunShader.setUniform("view", view);
+            render(sunShader, RENDER_COLOR, MODEL_LIGHTSOURCE);
 
             // Swap buffers and poll events
             glfwSwapBuffers(window);
@@ -217,32 +284,54 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-void render(Shader shader, bool usesNorm, bool usesColor)
+void render(Shader shader, unsigned int renderflags, unsigned int drawflags)
 {
     
     for (int i = 0; i < bufferCount; i++)
     {
+        ModelData modelData = modelDatas[i];
+        
+        // Skip models not in drawflags
+        if (!(drawflags & modelData.modelType))
+            continue;
 
         glBindVertexArray(VAOs[i]);
 
-        ModelData modelData = modelDatas[i];
-
-        // TODO: Get model transform based on model
         mat4 model = mat4(1.0f);
-        model = translate(model, modelData.translation);
+        if (modelData.modelType & MODEL_LIGHTSOURCE)
+        {   // Transform lightsource to be at sun position
+            model = sunTransform;
+        }
+        else if (modelData.modelType & MODEL_DEFAULT)
+        {   // Use modeldata transform
+            model = translate(model, modelData.translation);
+            vec3 rotationAxis = vec3(modelData.rotation);
+            if (rotationAxis != vec3(0))
+                model = rotate(model, modelData.rotation.w, rotationAxis);
+        }
+
         shader.setUniform("model", model);
 
-        if (usesNorm)
+        if (renderflags & RENDER_NORM)
         {
             mat3 normMat = mat3(transpose(inverse(model)));
             shader.setUniform("normMatrix", normMat);
         }
 
         // Color? Texture or flat
-        if (usesColor)
+        if (renderflags & RENDER_COLOR)
         {
             shader.setUniform("baseColor", modelData.color);
             shader.setUniform("lightColor", vec3(1.0f, 1.0f, 1.0f));
+        }
+
+        // Set isLight uniform during light occlusion
+        if (renderflags & RENDER_LIGHTOCCLUSION)
+        {
+            if (modelData.modelType & MODEL_LIGHTSOURCE)
+                shader.setUniform("isLight", true);
+            else
+                shader.setUniform("isLight", false);
         }
 
         // Get triangle count based on model
@@ -311,7 +400,7 @@ GLFWwindow* initializeAndCreateWindow(int screenWidth, int screenHeight, const c
 }
 
 unsigned int genBuffers(int bufferCount, unsigned int (&VBOs)[], unsigned int (&VAOs)[], unsigned int (&EBOs)[],
-    unsigned int &depthFBO, unsigned int &depthMap)
+    unsigned int &depthFBO, unsigned int &depthMap, unsigned int& occlusionFBO, unsigned int& occlusionMap)
 {
     glGenBuffers(bufferCount, VBOs);  
     glGenVertexArrays(bufferCount, VAOs);
@@ -321,6 +410,7 @@ unsigned int genBuffers(int bufferCount, unsigned int (&VBOs)[], unsigned int (&
     glGenTextures(1, &depthMap);
     
     // Depthmap texture
+    glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, depthMap);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, 
                 SHADOW_RESOLUTION, SHADOW_RESOLUTION, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
@@ -334,8 +424,36 @@ unsigned int genBuffers(int bufferCount, unsigned int (&VBOs)[], unsigned int (&
     // Binding texture to buffer
     glBindFramebuffer(GL_FRAMEBUFFER, depthFBO);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthMap, 0);
-    glDrawBuffer(GL_NONE);
-    glReadBuffer(GL_NONE);
+
+    //Occlusion texture
+    glGenFramebuffers(1, &occlusionFBO);
+    glGenTextures(1, &occlusionMap);
+
+    // Depthmap texture
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, occlusionMap);
+
+        // TODO: WHAT TO DO ABOUT RESIZING?
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 
+                SCREEN_WIDTH, SCREEN_HEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    
+    // Binding texture to buffer
+    glBindFramebuffer(GL_FRAMEBUFFER, occlusionFBO);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, occlusionMap, 0);
+
+    // Occlusion buffer requires depth
+    unsigned int rbo;
+    glGenRenderbuffers(1, &rbo);
+    glBindRenderbuffer(GL_RENDERBUFFER, rbo); 
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, SCREEN_WIDTH, SCREEN_HEIGHT);  
+    glBindRenderbuffer(GL_RENDERBUFFER, 0);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);  
+
+
 
     return 1;
 }
@@ -346,8 +464,9 @@ unsigned int bindBuffer(int bufferIndex, unsigned int (&VBOs)[], unsigned int (&
     glBindVertexArray(VAOs[bufferIndex]);
     glBindBuffer(GL_ARRAY_BUFFER, VBOs[bufferIndex]);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[bufferIndex]);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(vertices), &vertices[0], GL_STATIC_DRAW);  
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(indices), &indices[0], GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), &vertices[0], GL_STATIC_DRAW);  
+    
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(int), &indices[0], GL_STATIC_DRAW);
 
     // Position data
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
@@ -377,7 +496,7 @@ void framebufferSizeCallback(GLFWwindow* window, int newWidth, int newHeight)
 unsigned int handleArgs(int argc, char*argv[])
 {
     int c;
-    while ((c = getopt(argc, argv, "nfch")) != -1) {
+    while ((c = getopt(argc, argv, "nfchv")) != -1) {
         switch (c) {
             case 'n': 
                 SetDebug(DEBUG_DRAW_NORMS);
@@ -387,6 +506,9 @@ unsigned int handleArgs(int argc, char*argv[])
                 break;
             case 'c':
                 SetDebug(DEBUG_FREEHAND_CAMERA);
+                break;
+            case 'v':
+                SetDebug(DEBUG_VERBOSE);
                 break;
             // TODO: Command line argument to set framerate
             case 'h':
@@ -405,6 +527,7 @@ void displayHelp()
 {
     cout << "Usage: ./sunset.exe [options]" << endl;
     cout << "   options:" << endl;
+    cout << "      -v display verbose logs" << endl;
     cout << "      -n draw normals" << endl;
     cout << "      -f enable framerate debug" << endl;
     cout << "      -c enable full camera control" << endl;

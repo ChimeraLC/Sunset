@@ -18,10 +18,16 @@ unsigned int createModel(int index, vector<float>& vertices, vector<int>& indice
     switch (index)
     {
         case 0:
-            createModelGround(vertices, indices, modelData, triangleCount);
+            createModelSun(vertices, indices, modelData, triangleCount);
             break;
         case 1:
-            createModelTrunk(vertices, indices, modelData, triangleCount);
+            createModelGround(vertices, indices, modelData, triangleCount);
+            break;
+        case 2:
+            createModelTrunk(vertices, indices, modelData, triangleCount, vec3(0.2, 0, 0));
+            break;
+        case 3:
+            createModelTrunk(vertices, indices, modelData, triangleCount, vec3(-0.2, 0, 0));
             break;
         default:
             return 0;
@@ -33,24 +39,6 @@ float randFloat() {
     return ((float) rand()) / RAND_MAX;    
 }
 
-void createModelGround(vector<float>& vertices, vector<int>& indices, 
-    ModelData& modelData, int& triangleCount) {
-    vertices = {
-            1.0, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f,
-            1.0, 0.0f, -1.0f, 0.0f, 1.0f, 0.0f,
-            -1.0f, 0.0f, -1.0f, 0.0f, 1.0f, 0.0f,
-            -1.0, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f
-        };
-
-    indices = {
-            0, 1, 3,
-            1, 2, 3
-        };
-
-    triangleCount = 2;
-    modelData.color = vec3(0.0f, 0.3f, 0.0f);
-}
-
 void fillVertexNormals(vector<float> const& preVertices, 
         vector<int> const& preIndices,
         vector<float>& vertices, vector<int>& indices,
@@ -60,7 +48,7 @@ void fillVertexNormals(vector<float> const& preVertices,
 
     for (int i = 0; i < triangleCount; i++)
     {
-        int triIndices[] = {preIndices[i * 3 ], 
+        int triIndices[] = {preIndices[i * 3], 
             preIndices[i * 3 + 1], preIndices[i * 3 + 2]};
 
         // Calculate normals
@@ -131,6 +119,49 @@ void displayValues(vector<float>& preVertices, vector<int>& preIndices)
     }
 }
 
+void createModelSun(vector<float>& vertices, vector<int>& indices, 
+    ModelData& modelData, int& triangleCount) {
+
+    modelData.modelType |= MODEL_LIGHTSOURCE;
+    modelData.translation = vec3(3, 3, 4);
+
+    vertices = {
+            1, 1, 0, 0, 1, 1,
+            -1, 1, 0, 0, 1, 1,
+            -1, -1, 0, 0, 1, 1,
+            1, -1, 0, 0, 0, 1
+        };
+
+    indices = {
+            0, 1, 3,
+            1, 2, 3
+        };
+
+    triangleCount = 2;
+    modelData.color = vec3(0.95f, 0.9f, 0.6f);
+}
+
+void createModelGround(vector<float>& vertices, vector<int>& indices, 
+    ModelData& modelData, int& triangleCount) {
+        
+    modelData.modelType |= MODEL_DEFAULT;
+
+    vector<float> preVertices = {
+            1.0, 0.0f, 1.0f,
+            1.0, 0.0f, -1.0f, 
+            -1.0f, 0.0f, -1.0f,
+            -1.0, 0.0f, 1.0f, 
+        };
+
+    vector<int> preIndices = {
+            0, 1, 3,
+            1, 2, 3
+        };
+
+    fillVertexNormals(preVertices, preIndices, vertices, indices, triangleCount);
+    modelData.color = vec3(0.0f, 0.3f, 0.0f);
+}
+
 // ████████╗██████╗ ███████╗███████╗
 // ╚══██╔══╝██╔══██╗██╔════╝██╔════╝
 //    ██║   ██████╔╝█████╗  █████╗  
@@ -192,11 +223,13 @@ void capBranch(vec3 branchEnd, int indexA, int sides,
 // }
 
 void createModelTrunk(vector<float>& vertices, vector<int>& indices, 
-    ModelData& modelData, int& triangleCount) {
+    ModelData& modelData, int& triangleCount, vec3 offset = vec3(0)) {
 
+    modelData.modelType |= MODEL_DEFAULT;
     modelData.color = vec3(0.6f, 0.3f, 0.0f);
-
-    int sides = 7;
+    modelData.translation = offset;
+    
+    int sides = 10;
 
     vector<float> preVertices;
     vector<int> preIndices;
@@ -207,33 +240,6 @@ void createModelTrunk(vector<float>& vertices, vector<int>& indices,
     connectTreeRings(indexA, indexB, sides, preIndices);
     connectTreeRings(indexB, indexC, sides, preIndices);
     capBranch(vec3(0.1f, 0.6f, 0.0f), indexC, sides, preVertices, preIndices);
-    
+
     fillVertexNormals(preVertices, preIndices, vertices, indices, triangleCount);
 }
-
-    // preVertices = {
-    //         0.3f, 0.0f, 0.3f, 
-    //         0.3f, 0.0f, -0.3f, 
-    //         -0.3f, 0.0f, -0.3f, 
-    //         -0.3f, 0.0f, 0.3f, 
-    //         0.25f, 0.5f, 0.25f, 
-    //         0.25f, 0.5f, -0.25f, 
-    //         -0.25f, 0.5f, -0.25f, 
-    //         -0.25f, 0.5f, 0.25f, 
-    //         0.0f, 1.0f, 0.0f, 
-    // };
-
-    // preIndices = {
-    //     0, 1, 4,
-    //     1, 5, 4,
-    //     1, 2, 5,
-    //     2, 6, 5,
-    //     2, 3, 6,
-    //     3, 7, 6,
-    //     3, 0, 7,
-    //     0, 4, 7,
-    //     4, 5, 8,
-    //     5, 6, 8,
-    //     6, 7, 8,
-    //     7, 4, 8
-    // };
