@@ -8,6 +8,7 @@ using namespace glm;
 class Shader
 {
     public:
+        Shader();
         Shader(string vertexPath, string fragmentPath);
         
         bool isValid;

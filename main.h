@@ -9,8 +9,12 @@ void displayHelp();
 
 GLFWwindow* initializeAndCreateWindow(int screenWidth, int screenHeight, const char* windowName);
 
-unsigned int genBuffers(int bufferCount, unsigned int (&VBOs)[], unsigned int (&VAOs)[], unsigned int (&EBOs)[],
-    unsigned int &depthFBO, unsigned int &depthMap, unsigned int& occlusionFBO, unsigned int& occlusionMap);
+bool compileShaders();
+
+unsigned int genBuffers(int bufferCount, 
+    unsigned int (&VBOs)[], unsigned int (&VAOs)[], unsigned int (&EBOs)[], unsigned int& quadVBO,
+    unsigned int& depthFBO, unsigned int& depthMap, unsigned int& occlusionFBO, unsigned int& occlusionMap,
+    unsigned int& postFBO, unsigned int& postMap);
 
 unsigned int bindBuffer(int bufferIndex, unsigned int (&VBOs)[], unsigned int (&VAOs)[], 
         unsigned int (&EBOs)[], vector<float> vertices, vector<int> indices);
@@ -25,6 +29,18 @@ enum RenderFlags {
 };
 
 void render(Shader shader, unsigned int renderflags, unsigned int drawflags = ~0);
+void renderScreenQuad(Shader shader);
 
 // Callback functions
 void framebufferSizeCallback(GLFWwindow* window, int newWidth, int newHeight);
+
+// Generic quad
+std::vector<float> quadVertices = {
+	-1,  1,   0, 1,
+	-1, -1,   0, 0,
+	 1, -1,   1, 0,
+
+	-1,  1,   0, 1,
+	 1, -1,   1, 0,
+	 1,  1,   1, 1
+};

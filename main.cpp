@@ -29,7 +29,7 @@ const int SCREEN_HEIGHT = 1080;
 int curWidth = SCREEN_WIDTH;
 int curHeight = SCREEN_HEIGHT;
 const float ASPECT_RATIO = (float) SCREEN_WIDTH / (float) SCREEN_HEIGHT;
-const float FRAMERATE = 60.0f;
+const float FRAMERATE = 40.0f;
 const float PER_FRAME = 1 / FRAMERATE;
 
 const int SHADOW_RESOLUTION = 512;
@@ -44,8 +44,11 @@ float sunRenderDist = 15;   // Distance sun model is rendered
 // Global values
 const int bufferCount = 4;
 unsigned int VAOs[bufferCount];
+unsigned int quadVAO;
 vector<int> triangleCounts;
 vector<ModelData> modelDatas;
+
+Shader shader, sunShader, occlusionShader, depthShader, screenShader, radialShader;
 
 Camera* camera;
 float mouseX;
@@ -79,41 +82,25 @@ int main(int argc, char *argv[])
 
     PrintLog("Initializing shaders");
     // Shaders
-    Shader shader = Shader("shaders/base/flatShader.vs", 
-        DebugActive(DEBUG_DRAW_NORMS) ? "shaders/base/normShader.fs" : "shaders/base/flatShader.fs");
-    if (!shader.isValid) {
-        cerr << "Error when compiling base shader" << endl;
-        return -1; }
-
-    Shader sunShader = Shader("shaders/sun/sunShader.vs", "shaders/sun/sunShader.fs");
-    if (!sunShader.isValid) {
-        cerr << "Error when compiling sun shader" << endl;
-        return -1; }
-
-    Shader occlusionShader = Shader("shaders/occlusion/occlusionShader.vs", "shaders/occlusion/occlusionShader.fs");
-    if (!occlusionShader.isValid) {
-        cerr << "Error when compiling sun shader" << endl;
-        return -1; }
-
-    Shader depthShader = Shader("shaders/depth/depthShader.vs", "shaders/depth/depthShader.fs");
-    if (!depthShader.isValid) {
-        cerr << "Error when compiling depth shader" << endl;
-        return -1; }
+    if (!compileShaders())
+        return -1;
 
     // TODO: How is buffer count generated?
-    unsigned int VBOs[bufferCount], EBOs[bufferCount];
-    unsigned int depthFBO, depthMap, occlusionFBO, occlusionMap;
+    unsigned int VBOs[bufferCount], EBOs[bufferCount], quadVBO;
+    unsigned int depthFBO, depthMap, occlusionFBO, occlusionMap, postFBO, postMap;
 
     PrintLog("Generating buffers");
-    genBuffers(bufferCount, VBOs, VAOs, EBOs, depthFBO, depthMap, occlusionFBO, occlusionMap);
+    genBuffers(bufferCount, VBOs, VAOs, EBOs, quadVBO, depthFBO, depthMap, 
+        occlusionFBO, occlusionMap, postFBO, postMap);
 
     PrintLog("Generating models");
 
     // Generic scene info
-    sunDirection = normalize(vec3(3, 0.01, 4));
+    sunDirection = normalize(vec3(3, 0.2, 4));
     vec3 lightDirection = -sunDirection;
     sunTransform = mat4(1.0f);
-    vec3 sunPosition = sunDirection * sunRenderDist;
+    // Sun is visually lower than the actual lightsource
+    vec3 sunPosition = sunDirection * sunRenderDist - vec3(0, 1, 0);
     sunTransform = translate(sunTransform, sunPosition);
     sunTransform *= inverse(lookAt(lightDirection, sunDirection, vec3(0, 1, 0)));
 
@@ -239,35 +226,57 @@ int main(int argc, char *argv[])
             glBindTexture(GL_TEXTURE_2D, depthMap);
             glActiveTexture(GL_TEXTURE1);
             glBindTexture(GL_TEXTURE_2D, occlusionMap);
+
+            // Postprocess
+            glBindFramebuffer(GL_FRAMEBUFFER, postFBO);
+            glClearColor(COLOR_BLACK[0], COLOR_BLACK[1], COLOR_BLACK[2], COLOR_BLACK[3]);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            radialShader.setActive();
+            radialShader.setUniform("screenTex", 1);
+            radialShader.setUniform("lightScreenPos", sunScreenPos);
+            renderScreenQuad(radialShader);
                     
+            glActiveTexture(GL_TEXTURE2);
+            glBindTexture(GL_TEXTURE_2D, postMap);
+
             //Bind main texture
             glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
             glViewport(0, 0, curWidth, curHeight);
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-            // Main render
-            shader.setActive();
-            shader.setUniform("shadowMap", 0);
-            shader.setUniform("occlusionMap", 1);
-            shader.setUniform("lightView", lightViewMatrix);
-            shader.setUniform("lightDir", lightDirection);
-            shader.setUniform("lightScreenPos", sunScreenPos);
+            if (DebugActive(DEBUG_DRAW_LIGHTRAYS))
+            {
+                // Screen shader
+                screenShader.setActive();
+                screenShader.setUniform("screenTex", 2);
+                renderScreenQuad(screenShader);
+            }
+            else
+            {
+                //Main render
+                shader.setActive();
+                shader.setUniform("shadowMap", 0);
+                shader.setUniform("lightraysTex", 2);
+                shader.setUniform("lightView", lightViewMatrix);
+                shader.setUniform("lightDir", lightDirection);
+                shader.setUniform("lightScreenPos", sunScreenPos);
+                
+                // Projection
+                shader.setUniform("projection", projection);
+                
+                // View
+                shader.setUniform("view", view);
+
+                render(shader, RENDER_NORM | RENDER_COLOR, MODEL_DEFAULT);
+
+                // Sun render
+                sunShader.setActive();
+                sunShader.setUniform("projection", projection);
+                sunShader.setUniform("view", view);
+                render(sunShader, RENDER_COLOR, MODEL_LIGHTSOURCE);
+            } 
             
-            // Projection
-            shader.setUniform("projection", projection);
-            
-            // View
-            shader.setUniform("view", view);
-
-            render(shader, RENDER_NORM | RENDER_COLOR, MODEL_DEFAULT);
-
-            // Sun render
-            sunShader.setActive();
-            sunShader.setUniform("projection", projection);
-            sunShader.setUniform("view", view);
-            render(sunShader, RENDER_COLOR, MODEL_LIGHTSOURCE);
-
             // Swap buffers and poll events
             glfwSwapBuffers(window);
             glfwPollEvents(); 
@@ -338,7 +347,13 @@ void render(Shader shader, unsigned int renderflags, unsigned int drawflags)
         glDrawElements(GL_TRIANGLES, 3 * triangleCounts[i], 
                 GL_UNSIGNED_INT, 0);
     }
+}
 
+void renderScreenQuad(Shader shader)
+{
+    (void) shader;
+    glBindVertexArray(quadVAO);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
 }
 
 void processInput(GLFWwindow* window)
@@ -399,12 +414,60 @@ GLFWwindow* initializeAndCreateWindow(int screenWidth, int screenHeight, const c
     return window;
 }
 
-unsigned int genBuffers(int bufferCount, unsigned int (&VBOs)[], unsigned int (&VAOs)[], unsigned int (&EBOs)[],
-    unsigned int &depthFBO, unsigned int &depthMap, unsigned int& occlusionFBO, unsigned int& occlusionMap)
+bool compileShaders()
+{
+    shader = Shader("shaders/base/flatShader.vs", 
+        DebugActive(DEBUG_DRAW_NORMS) ? "shaders/base/normShader.fs" : "shaders/base/flatShader.fs");
+    if (!shader.isValid) {
+        cerr << "Error when compiling base shader" << endl;
+        return false; }
+
+    sunShader = Shader("shaders/sun/sunShader.vs", "shaders/sun/sunShader.fs");
+    if (!sunShader.isValid) {
+        cerr << "Error when compiling sun shader" << endl;
+        return false; }
+
+    occlusionShader = Shader("shaders/occlusion/occlusionShader.vs", "shaders/occlusion/occlusionShader.fs");
+    if (!occlusionShader.isValid) {
+        cerr << "Error when compiling sun shader" << endl;
+        return false; }
+
+    depthShader = Shader("shaders/depth/depthShader.vs", "shaders/depth/depthShader.fs");
+    if (!depthShader.isValid) {
+        cerr << "Error when compiling depth shader" << endl;
+        return false; }
+
+    screenShader = Shader("shaders/postprocess/screenShader.vs", "shaders/postprocess/screenShader.fs");
+    if (!screenShader.isValid) {
+        cerr << "Error when compiling screen shader" << endl;
+        return false; }
+
+    radialShader = Shader("shaders/postprocess/screenShader.vs", "shaders/postprocess/radialBlurShader.fs");
+    if (!radialShader.isValid) {
+        cerr << "Error when compiling radial blur shader" << endl;
+        return false; }
+
+    return true;
+}
+
+unsigned int genBuffers(int bufferCount, 
+    unsigned int (&VBOs)[], unsigned int (&VAOs)[], unsigned int (&EBOs)[], unsigned int& quadVBO,
+    unsigned int &depthFBO, unsigned int &depthMap, unsigned int& occlusionFBO, unsigned int& occlusionMap,
+    unsigned int& postFBO, unsigned int& postMap)
 {
     glGenBuffers(bufferCount, VBOs);  
     glGenVertexArrays(bufferCount, VAOs);
     glGenBuffers(bufferCount, EBOs);
+
+    glGenVertexArrays(1, &quadVAO);
+    glGenBuffers(1, &quadVBO);
+    glBindVertexArray(quadVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
+    glBufferData(GL_ARRAY_BUFFER, quadVertices.size() * sizeof(float), &quadVertices[0], GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
 
     glGenFramebuffers(1, &depthFBO);
     glGenTextures(1, &depthMap);
@@ -429,7 +492,6 @@ unsigned int genBuffers(int bufferCount, unsigned int (&VBOs)[], unsigned int (&
     glGenFramebuffers(1, &occlusionFBO);
     glGenTextures(1, &occlusionMap);
 
-    // Depthmap texture
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, occlusionMap);
 
@@ -453,7 +515,24 @@ unsigned int genBuffers(int bufferCount, unsigned int (&VBOs)[], unsigned int (&
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);  
 
+    // Postprocessing texture
+    glGenFramebuffers(1, &postFBO);
+    glGenTextures(1, &postMap);
 
+    // Depthmap texture
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, postMap);
+
+        // TODO: WHAT TO DO ABOUT RESIZING?
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 
+                SCREEN_WIDTH, SCREEN_HEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    
+    // Binding texture to buffer
+    glBindFramebuffer(GL_FRAMEBUFFER, postFBO);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, postMap, 0);
 
     return 1;
 }
@@ -496,7 +575,7 @@ void framebufferSizeCallback(GLFWwindow* window, int newWidth, int newHeight)
 unsigned int handleArgs(int argc, char*argv[])
 {
     int c;
-    while ((c = getopt(argc, argv, "nfchv")) != -1) {
+    while ((c = getopt(argc, argv, "nfchvl")) != -1) {
         switch (c) {
             case 'n': 
                 SetDebug(DEBUG_DRAW_NORMS);
@@ -509,6 +588,9 @@ unsigned int handleArgs(int argc, char*argv[])
                 break;
             case 'v':
                 SetDebug(DEBUG_VERBOSE);
+                break;
+            case 'l':
+                SetDebug(DEBUG_DRAW_LIGHTRAYS);
                 break;
             // TODO: Command line argument to set framerate
             case 'h':
@@ -529,6 +611,7 @@ void displayHelp()
     cout << "   options:" << endl;
     cout << "      -v display verbose logs" << endl;
     cout << "      -n draw normals" << endl;
+    cout << "      -l draw lightrays render" << endl;
     cout << "      -f enable framerate debug" << endl;
     cout << "      -c enable full camera control" << endl;
 }

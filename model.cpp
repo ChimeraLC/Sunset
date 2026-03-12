@@ -123,21 +123,20 @@ void createModelSun(vector<float>& vertices, vector<int>& indices,
     ModelData& modelData, int& triangleCount) {
 
     modelData.modelType |= MODEL_LIGHTSOURCE;
-    modelData.translation = vec3(3, 3, 4);
 
-    vertices = {
-            1, 1, 0, 0, 1, 1,
-            -1, 1, 0, 0, 1, 1,
-            -1, -1, 0, 0, 1, 1,
-            1, -1, 0, 0, 0, 1
-        };
+    int sunSides = 12;
+    vector<float> preVertices;
+    vector<int> preIndices;
+    
+    float angle = PI * 2 / sunSides;
+    for (int i = 0; i < sunSides; i++)
+    {
+        pushTriangle(preVertices, vec3(cos(angle * (i + 0.5)), sin(angle * (i + 0.5)), 0));
+        pushIndices(preIndices, i, i + 1, sunSides - 1);
+    }
 
-    indices = {
-            0, 1, 3,
-            1, 2, 3
-        };
 
-    triangleCount = 2;
+    fillVertexNormals(preVertices, preIndices, vertices, indices, triangleCount);
     modelData.color = vec3(0.95f, 0.9f, 0.6f);
 }
 

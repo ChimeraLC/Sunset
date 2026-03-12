@@ -7,7 +7,7 @@ in vec3 fragPos;
 in vec3 fragLightPos;
 
 uniform sampler2D shadowMap;
-uniform sampler2D occlusionMap;
+uniform sampler2D lightraysTex;
 
 uniform vec3 baseColor;
 uniform vec3 lightColor;
@@ -50,31 +50,15 @@ float shadowCalc(vec3 inFragLightPos, vec3 norm)
     return inShadow;
 }
 
-// TODO: Do a prepass on the texture and sample that, instead of doing it every pixel
-float godRay(vec2 screenPos, int sampleCount)
-{
-    vec2 sampleDir = (lightScreenPos.xy - screenPos) / sampleCount;
-    vec2 samplePos = screenPos;
-    float intensity = texture(occlusionMap, samplePos).x;
-    float density = 1.0f;
-    for (int i = 0; i < sampleCount; i++)
-    {
-        samplePos += sampleDir;
-        intensity += texture(occlusionMap, samplePos).x * density;
-        density *= 0.95f;
-    }
-    return intensity * 0.2f;
-}
-
 void main()
 {
     vec2 screenPos = gl_FragCoord.xy / vec2(1920, 1080);
 
     // God rays
-    float intensity = godRay(screenPos, 40);
+    float intensity = texture(lightraysTex, screenPos).r;
 
     // Ambient lighting
-    float ambientCoef = 0.25 * (0.5 + intensity);
+    float ambientCoef = 0.25 * (0.5 + 4 * intensity);
     
     // Diffuse lighting TODO: Assert always pre-normalized if not scaling? reduce computation
     vec3 norm = normalize(normal);

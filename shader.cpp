@@ -102,6 +102,11 @@ Shader::Shader(string vertexPath, string fragmentPath)
     isValid = true;
 }
 
+Shader::Shader()
+{
+    isValid = false;
+}
+
 void Shader::setActive() const
 {
     glUseProgram(shaderProgram);
