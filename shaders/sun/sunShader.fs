@@ -2,12 +2,17 @@
 
 out vec4 fragColor;
 
-in vec3 normal;  
-in vec3 fragPos;  
+in vec2 texPos;
 
-uniform vec3 baseColor;
+uniform sampler2D screenTex;
+uniform sampler2D bloomTex;
+uniform vec3 sunColor;
 
 void main()
 {
-    fragColor = vec4(baseColor, 1.0);
+    vec3 screenColor = texture(screenTex, texPos).rgb;
+    float bloomIntensity = texture(bloomTex, texPos).r;
+    vec3 bloomColor = bloomIntensity * sunColor;
+    vec3 outColor = bloomIntensity * sunColor + (1 - bloomIntensity) * screenColor;
+    fragColor = vec4(outColor, 1.0);
 }

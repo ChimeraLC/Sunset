@@ -1,5 +1,5 @@
 #version 330 core
-out vec4 FragColor;
+out vec4 fragColor;
 
 in vec2 texPos;
 
@@ -7,5 +7,5 @@ uniform sampler2D screenTex;
 
 void main()
 {
-    FragColor = vec4(texture(screenTex, texPos).rgb, 1.0);
+    fragColor = vec4(texture(screenTex, texPos).rgb, 1.0);
 } 

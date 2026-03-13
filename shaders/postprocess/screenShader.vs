@@ -4,11 +4,9 @@ layout (location = 0) in vec2 vertexPos;
 layout (location = 1) in vec2 inTexPos;
 
 out vec2 texPos;
-out vec2 screenPos;
 
 void main()
 {
     texPos = inTexPos;
     gl_Position = vec4(vertexPos.x, vertexPos.y, 0.0, 1.0); 
-    screenPos = vec2(vertexPos.x, vertexPos.y) * 0.5 + 0.5;
 }  

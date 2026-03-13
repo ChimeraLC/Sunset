@@ -12,12 +12,22 @@ GLFWwindow* initializeAndCreateWindow(int screenWidth, int screenHeight, const c
 bool compileShaders();
 
 unsigned int genBuffers(int bufferCount, 
-    unsigned int (&VBOs)[], unsigned int (&VAOs)[], unsigned int (&EBOs)[], unsigned int& quadVBO,
-    unsigned int& depthFBO, unsigned int& depthMap, unsigned int& occlusionFBO, unsigned int& occlusionMap,
-    unsigned int& postFBO, unsigned int& postMap);
+    unsigned int (&VBOs)[], unsigned int (&VAOs)[], unsigned int (&EBOs)[], unsigned int& quadVBO);
 
 unsigned int bindBuffer(int bufferIndex, unsigned int (&VBOs)[], unsigned int (&VAOs)[], 
         unsigned int (&EBOs)[], vector<float> vertices, vector<int> indices);
+
+enum TextureBuffer {
+    DEPTH_MAP,
+    OCCLUSION_MAP,
+    LIGHTRAYS_MAP,
+    POSTPROCESS,
+    TEMPORARY_A,
+    BLOOM,
+    FRAMEBUFFER_COUNT,
+};
+void bindFramebuffer(TextureBuffer buffer);
+void bindTexture(TextureBuffer buffer);
 
 // Pipeline
 void processInput(GLFWwindow* window);
@@ -33,6 +43,7 @@ void renderScreenQuad(Shader shader);
 
 // Callback functions
 void framebufferSizeCallback(GLFWwindow* window, int newWidth, int newHeight);
+
 
 // Generic quad
 std::vector<float> quadVertices = {

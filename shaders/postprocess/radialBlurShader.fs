@@ -1,8 +1,7 @@
 #version 330 core
-out vec4 FragColor;
+out vec4 fragColor;
 
 in vec2 texPos;
-in vec2 screenPos;
 
 uniform sampler2D screenTex;
 uniform vec3 lightScreenPos;
@@ -10,8 +9,8 @@ uniform vec3 lightScreenPos;
 void main()
 {
     int sampleCount = 100;
-    vec2 sampleDir = (lightScreenPos.xy - screenPos) / sampleCount;
-    vec2 samplePos = screenPos;
+    vec2 sampleDir = (lightScreenPos.xy - texPos) / sampleCount;
+    vec2 samplePos = texPos;
     vec3 color = vec3(0);
     float density = 1.0f;
     for (int i = 0; i < sampleCount; i++)
@@ -20,5 +19,5 @@ void main()
         color += texture(screenTex, samplePos).rgb * density / sampleCount;
         density *= 0.99f;
     }
-    FragColor = vec4(color, 1);
+    fragColor = vec4(color, 1);
 } 

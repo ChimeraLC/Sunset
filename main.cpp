@@ -41,14 +41,17 @@ mat4 sunTransform = mat4(1.0);
 float sunShadowDist = 5;    // Distance shadowmap is rendered from
 float sunRenderDist = 15;   // Distance sun model is rendered
 
+vec3 sunColor = vec3(0.9f, 0.30f, 0.35f);
+
 // Global values
 const int bufferCount = 4;
-unsigned int VAOs[bufferCount];
+unsigned int VAOs[bufferCount], FBOs[FRAMEBUFFER_COUNT], FTexs[FRAMEBUFFER_COUNT];
 unsigned int quadVAO;
 vector<int> triangleCounts;
 vector<ModelData> modelDatas;
 
-Shader shader, sunShader, occlusionShader, depthShader, screenShader, radialShader;
+Shader shader, sunShader, occlusionShader, depthShader, screenShader, radialShader, 
+    horizonShader, bloomShader;
 
 Camera* camera;
 float mouseX;
@@ -87,11 +90,9 @@ int main(int argc, char *argv[])
 
     // TODO: How is buffer count generated?
     unsigned int VBOs[bufferCount], EBOs[bufferCount], quadVBO;
-    unsigned int depthFBO, depthMap, occlusionFBO, occlusionMap, postFBO, postMap;
 
     PrintLog("Generating buffers");
-    genBuffers(bufferCount, VBOs, VAOs, EBOs, quadVBO, depthFBO, depthMap, 
-        occlusionFBO, occlusionMap, postFBO, postMap);
+    genBuffers(bufferCount, VBOs, VAOs, EBOs, quadVBO);
 
     PrintLog("Generating models");
 
@@ -132,7 +133,7 @@ int main(int argc, char *argv[])
     }
     else
     {
-        camera = new FixedCamera(vec3(0, 2, 3));
+        camera = new FixedCamera(0.2, 2, 2.5);
     }
 
     // TODO: Calculate close and far planes based on model and sun
@@ -193,7 +194,7 @@ int main(int argc, char *argv[])
 
             // Depth buffer render
             glViewport(0, 0, SHADOW_RESOLUTION, SHADOW_RESOLUTION);
-            glBindFramebuffer(GL_FRAMEBUFFER, depthFBO);
+            bindFramebuffer(DEPTH_MAP);
             glClear(GL_DEPTH_BUFFER_BIT);
             
             depthShader.setActive();
@@ -202,6 +203,9 @@ int main(int argc, char *argv[])
             // TODO: Peter panning?
             // No need to render sun for shadowmap
             render(depthShader, 0, MODEL_DEFAULT);
+
+            glActiveTexture(GL_TEXTURE0);
+            bindTexture(DEPTH_MAP);
 
             // Projection and view
             mat4 projection = perspective(radians(45.0f), ASPECT_RATIO, 0.1f, 100.0f );
@@ -212,7 +216,7 @@ int main(int argc, char *argv[])
 
             // Bind occlusion buffer
             glViewport(0, 0, curWidth, curHeight);
-            glBindFramebuffer(GL_FRAMEBUFFER, occlusionFBO);
+            bindFramebuffer(OCCLUSION_MAP);
             glClearColor(COLOR_BLACK[0], COLOR_BLACK[1], COLOR_BLACK[2], COLOR_BLACK[3]);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -222,42 +226,64 @@ int main(int argc, char *argv[])
 
             render(occlusionShader, RENDER_LIGHTOCCLUSION);
 
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, depthMap);
-            glActiveTexture(GL_TEXTURE1);
-            glBindTexture(GL_TEXTURE_2D, occlusionMap);
+            bindTexture(OCCLUSION_MAP);
 
-            // Postprocess
-            glBindFramebuffer(GL_FRAMEBUFFER, postFBO);
+            // Lightrays map
+            bindFramebuffer(LIGHTRAYS_MAP);
             glClearColor(COLOR_BLACK[0], COLOR_BLACK[1], COLOR_BLACK[2], COLOR_BLACK[3]);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
             radialShader.setActive();
-            radialShader.setUniform("screenTex", 1);
+            radialShader.setUniform("screenTex", OCCLUSION_MAP);
             radialShader.setUniform("lightScreenPos", sunScreenPos);
             renderScreenQuad(radialShader);
                     
-            glActiveTexture(GL_TEXTURE2);
-            glBindTexture(GL_TEXTURE_2D, postMap);
+            bindTexture(LIGHTRAYS_MAP);
+
+            // Bloom postprocessing (two pass)
+            bindFramebuffer(TEMPORARY_A);
+            glClear(GL_COLOR_BUFFER_BIT);
+            bloomShader.setActive();
+            bloomShader.setUniform("occlusionTex", OCCLUSION_MAP);
+            bloomShader.setUniform("screenTex", OCCLUSION_MAP);
+            bloomShader.setUniform("stage", 0);
+            renderScreenQuad(bloomShader);
+            bindTexture(TEMPORARY_A);
+
+            // Reusing occlusion map since it's not used afterwards
+            bindFramebuffer(OCCLUSION_MAP);
+            glClear(GL_COLOR_BUFFER_BIT);
+            bloomShader.setUniform("screenTex", TEMPORARY_A);
+            bloomShader.setUniform("stage", 1);
+            renderScreenQuad(bloomShader);
+            bindTexture(OCCLUSION_MAP);
+
 
             //Bind main texture
             glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
             glViewport(0, 0, curWidth, curHeight);
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
             if (DebugActive(DEBUG_DRAW_LIGHTRAYS))
             {
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
                 // Screen shader
                 screenShader.setActive();
-                screenShader.setUniform("screenTex", 2);
+                screenShader.setUniform("screenTex", OCCLUSION_MAP);
                 renderScreenQuad(screenShader);
             }
             else
             {
+                bindFramebuffer(POSTPROCESS);
+                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+                // Render background // TODO: Change this to be a skybox, not a flat texture
+                horizonShader.setActive();
+                renderScreenQuad(screenShader);
+                glClear(GL_DEPTH_BUFFER_BIT); // Clear depth so everything goes in front of horizon
+                
                 //Main render
                 shader.setActive();
-                shader.setUniform("shadowMap", 0);
-                shader.setUniform("lightraysTex", 2);
+                shader.setUniform("shadowMap", DEPTH_MAP);
+                shader.setUniform("lightraysTex", LIGHTRAYS_MAP);
                 shader.setUniform("lightView", lightViewMatrix);
                 shader.setUniform("lightDir", lightDirection);
                 shader.setUniform("lightScreenPos", sunScreenPos);
@@ -270,11 +296,16 @@ int main(int argc, char *argv[])
 
                 render(shader, RENDER_NORM | RENDER_COLOR, MODEL_DEFAULT);
 
-                // Sun render
+                bindTexture(POSTPROCESS);
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+                // Sun render (postprocessing pass for bloom)
+                // TODO: Rename this to just "postShader" or something like that
                 sunShader.setActive();
-                sunShader.setUniform("projection", projection);
-                sunShader.setUniform("view", view);
-                render(sunShader, RENDER_COLOR, MODEL_LIGHTSOURCE);
+                sunShader.setUniform("screenTex", POSTPROCESS);
+                sunShader.setUniform("bloomTex", OCCLUSION_MAP);
+                sunShader.setUniform("sunColor", sunColor);
+                renderScreenQuad(sunShader);
             } 
             
             // Swap buffers and poll events
@@ -284,9 +315,15 @@ int main(int argc, char *argv[])
     }
 
     // Deallocate
+    glDeleteBuffers(bufferCount, VBOs);
     glDeleteVertexArrays(bufferCount, VAOs);
     glDeleteBuffers(bufferCount, VBOs);
-    glDeleteFramebuffers(1, &depthFBO);
+    glDeleteBuffers(1, &quadVBO);
+    glDeleteVertexArrays(1, &quadVAO);
+    glDeleteFramebuffers(FRAMEBUFFER_COUNT, FBOs);
+    glDeleteTextures(FRAMEBUFFER_COUNT, FTexs);
+
+    // Missing a lot of shaders lmao
     shader.deleteProgram();
 
     glfwTerminate();
@@ -331,7 +368,7 @@ void render(Shader shader, unsigned int renderflags, unsigned int drawflags)
         if (renderflags & RENDER_COLOR)
         {
             shader.setUniform("baseColor", modelData.color);
-            shader.setUniform("lightColor", vec3(1.0f, 1.0f, 1.0f));
+            shader.setUniform("lightColor", vec3(1.0f, 0.75f, 0.75f));
         }
 
         // Set isLight uniform during light occlusion
@@ -354,6 +391,16 @@ void renderScreenQuad(Shader shader)
     (void) shader;
     glBindVertexArray(quadVAO);
     glDrawArrays(GL_TRIANGLES, 0, 6);
+}
+
+void bindFramebuffer(TextureBuffer buffer)
+{
+    glBindFramebuffer(GL_FRAMEBUFFER, FBOs[buffer]);
+}
+void bindTexture(TextureBuffer buffer)
+{
+        glActiveTexture(GL_TEXTURE0 + buffer);
+        glBindTexture(GL_TEXTURE_2D, FTexs[buffer]);
 }
 
 void processInput(GLFWwindow* window)
@@ -414,6 +461,7 @@ GLFWwindow* initializeAndCreateWindow(int screenWidth, int screenHeight, const c
     return window;
 }
 
+// TODO: Clean this up TT
 bool compileShaders()
 {
     shader = Shader("shaders/base/flatShader.vs", 
@@ -422,7 +470,7 @@ bool compileShaders()
         cerr << "Error when compiling base shader" << endl;
         return false; }
 
-    sunShader = Shader("shaders/sun/sunShader.vs", "shaders/sun/sunShader.fs");
+    sunShader = Shader("shaders/postprocess/screenShader.vs", "shaders/sun/sunShader.fs");
     if (!sunShader.isValid) {
         cerr << "Error when compiling sun shader" << endl;
         return false; }
@@ -447,13 +495,21 @@ bool compileShaders()
         cerr << "Error when compiling radial blur shader" << endl;
         return false; }
 
+    horizonShader = Shader("shaders/postprocess/screenShader.vs", "shaders/horizon/horizonShader.fs");
+        if (!horizonShader.isValid) {
+            cerr << "Error when compiling horizon shader" << endl;
+            return false; }
+
+    bloomShader = Shader("shaders/postprocess/screenShader.vs", "shaders/postprocess/bloomShader.fs");
+        if (!bloomShader.isValid) {
+            cerr << "Error when compiling bloom shader" << endl;
+            return false; }
+
     return true;
 }
 
 unsigned int genBuffers(int bufferCount, 
-    unsigned int (&VBOs)[], unsigned int (&VAOs)[], unsigned int (&EBOs)[], unsigned int& quadVBO,
-    unsigned int &depthFBO, unsigned int &depthMap, unsigned int& occlusionFBO, unsigned int& occlusionMap,
-    unsigned int& postFBO, unsigned int& postMap)
+    unsigned int (&VBOs)[], unsigned int (&VAOs)[], unsigned int (&EBOs)[], unsigned int& quadVBO)
 {
     glGenBuffers(bufferCount, VBOs);  
     glGenVertexArrays(bufferCount, VAOs);
@@ -469,12 +525,13 @@ unsigned int genBuffers(int bufferCount,
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
 
-    glGenFramebuffers(1, &depthFBO);
-    glGenTextures(1, &depthMap);
-    
-    // Depthmap texture
+    // Generate all framebuffers
+    glGenFramebuffers(FRAMEBUFFER_COUNT, FBOs);
+    glGenTextures(FRAMEBUFFER_COUNT, FTexs);
+
+    // Depthmap
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, depthMap);
+    glBindTexture(GL_TEXTURE_2D, FBOs[DEPTH_MAP]);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, 
                 SHADOW_RESOLUTION, SHADOW_RESOLUTION, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -485,54 +542,36 @@ unsigned int genBuffers(int bufferCount,
     glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, COLOR_WHITE); 
 
     // Binding texture to buffer
-    glBindFramebuffer(GL_FRAMEBUFFER, depthFBO);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthMap, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, FBOs[DEPTH_MAP]);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, FTexs[DEPTH_MAP], 0);
 
-    //Occlusion texture
-    glGenFramebuffers(1, &occlusionFBO);
-    glGenTextures(1, &occlusionMap);
+    // Other textures (that use color)
+    for (int i = 1; i < FRAMEBUFFER_COUNT; i++)
+    {
+        glActiveTexture(GL_TEXTURE0 + i);
+        glBindTexture(GL_TEXTURE_2D, FTexs[i]);
 
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, occlusionMap);
-
-        // TODO: WHAT TO DO ABOUT RESIZING?
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 
-                SCREEN_WIDTH, SCREEN_HEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glBindTexture(GL_TEXTURE_2D, 0);
+            // TODO: WHAT TO DO ABOUT RESIZING?
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 
+                    SCREEN_WIDTH, SCREEN_HEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER); 
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER); 
+        glBindTexture(GL_TEXTURE_2D, 0);
     
-    // Binding texture to buffer
-    glBindFramebuffer(GL_FRAMEBUFFER, occlusionFBO);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, occlusionMap, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, FBOs[i]);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, FTexs[i], 0);
+    }
 
-    // Occlusion buffer requires depth
-    unsigned int rbo;
-    glGenRenderbuffers(1, &rbo);
-    glBindRenderbuffer(GL_RENDERBUFFER, rbo); 
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, SCREEN_WIDTH, SCREEN_HEIGHT);  
-    glBindRenderbuffer(GL_RENDERBUFFER, 0);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);  
-
-    // Postprocessing texture
-    glGenFramebuffers(1, &postFBO);
-    glGenTextures(1, &postMap);
-
-    // Depthmap texture
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, postMap);
-
-        // TODO: WHAT TO DO ABOUT RESIZING?
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 
-                SCREEN_WIDTH, SCREEN_HEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    
-    // Binding texture to buffer
-    glBindFramebuffer(GL_FRAMEBUFFER, postFBO);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, postMap, 0);
+    // TODO: Depth buffers, different sizes?
+    // unsigned int rbo;
+    // glGenRenderbuffers(1, &rbo);
+    // glBindRenderbuffer(GL_RENDERBUFFER, rbo); 
+    // glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, SCREEN_WIDTH, SCREEN_HEIGHT);  
+    // glBindRenderbuffer(GL_RENDERBUFFER, 0);
+    // glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo);
+    // glBindFramebuffer(GL_FRAMEBUFFER, 0);  
 
     return 1;
 }
@@ -555,21 +594,23 @@ unsigned int bindBuffer(int bufferIndex, unsigned int (&VBOs)[], unsigned int (&
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
-    // glBindBuffer(GL_ARRAY_BUFFER, 0);
-    // glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
 
     return 1;
 }
 
 void framebufferSizeCallback(GLFWwindow* window, int newWidth, int newHeight)
 {
-    // Resize
-    curWidth = newWidth;
-    curHeight = newHeight;
-    glViewport(0, 0, curWidth, curHeight);
+    // Resize TODO: UNSUPPORTED WITH FRAMEBUFFERS
+    // curWidth = newWidth;
+    // curHeight = newHeight;
+    // glViewport(0, 0, curWidth, curHeight);
     
     // Unused variables
     (void) window;
+    (void) newWidth;
+    (void) newHeight;
 }
 
 unsigned int handleArgs(int argc, char*argv[])

@@ -28,20 +28,23 @@ class Camera {
 class FixedCamera : public Camera
 {
     public:
-        FixedCamera(vec3 _position, vec3 _worldUp = vec3(0.0f, 1.0f, 0.0f))
+        FixedCamera(float _height, float _radius, float _speed = 1, vec3 _worldUp = vec3(0.0f, 1.0f, 0.0f))
         {
-            position = _position;
             worldUp = _worldUp;
             facing = vec3(0);
             up = vec3(0);
             target = vec3(0);
             cameraTime = 0;
+            height = _height;
+            radius = _radius;
+            speed = _speed;
+            SetPosition(vec3(radius * cos(cameraTime), height, radius * sin(cameraTime)));
         }
 
         virtual void ProcessInput(GLFWwindow* window, float deltaTime) {
             (void) window;
-            cameraTime += deltaTime / 3;
-            SetPosition(vec3(3 * cos(cameraTime), 2, 3 * sin(cameraTime)));
+            cameraTime += deltaTime / 3 * speed;
+            SetPosition(vec3(radius * cos(cameraTime), height, radius * sin(cameraTime)));
         }
 
         void SetPosition(vec3 newPosition) { position = newPosition; RecalcVectors(); }
@@ -57,6 +60,9 @@ class FixedCamera : public Camera
     private:
         vec3 target;
         float cameraTime;
+        float radius;
+        float height;
+        float speed;
 };
 
 const float MOVE_SPEED = 1.0f;
