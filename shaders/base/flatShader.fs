@@ -12,7 +12,6 @@ uniform sampler2D lightraysTex;
 uniform vec3 baseColor;
 uniform vec3 lightColor;
 uniform vec3 lightDir;
-uniform vec3 lightScreenPos;
 uniform vec3 camPos;
 
 // TODO: Fix aliasing on oblique surfaces
@@ -58,7 +57,7 @@ void main()
     float intensity = texture(lightraysTex, screenPos).r;
 
     // Ambient lighting
-    float ambientCoef = 0.25 * (0.5 + 4 * intensity);
+    float ambientCoef = 0.25 * (0.5 + 8 * intensity);
     
     // Diffuse lighting TODO: Assert always pre-normalized if not scaling? reduce computation
     vec3 norm = normalize(normal);

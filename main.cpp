@@ -17,6 +17,7 @@
 #include "shader.h"
 #include "camera.h"
 #include "debug.h"
+#include "texture.h"
 
 #include "main.h"
 
@@ -44,14 +45,17 @@ float sunRenderDist = 15;   // Distance sun model is rendered
 vec3 sunColor = vec3(0.9f, 0.30f, 0.35f);
 
 // Global values
-const int bufferCount = 4;
+const int bufferCount = 5;
 unsigned int VAOs[bufferCount], FBOs[FRAMEBUFFER_COUNT], FTexs[FRAMEBUFFER_COUNT];
 unsigned int quadVAO;
 vector<int> triangleCounts;
 vector<ModelData> modelDatas;
 
-Shader shader, sunShader, occlusionShader, depthShader, screenShader, radialShader, 
-    horizonShader, bloomShader;
+unsigned int skyTexture;
+
+// TODO: Really need to cut down on shader count somehow, or, at least move into enum
+Shader shader, postShader, occlusionShader, depthShader, screenShader, radialShader, 
+    bloomShader, skyboxShader;
 
 Camera* camera;
 float mouseX;
@@ -94,10 +98,13 @@ int main(int argc, char *argv[])
     PrintLog("Generating buffers");
     genBuffers(bufferCount, VBOs, VAOs, EBOs, quadVBO);
 
+    PrintLog("Generating textures");
+    genTextures();
+
     PrintLog("Generating models");
 
     // Generic scene info
-    sunDirection = normalize(vec3(3, 0.2, 4));
+    sunDirection = normalize(vec3(3, 1, 4));
     vec3 lightDirection = -sunDirection;
     sunTransform = mat4(1.0f);
     // Sun is visually lower than the actual lightsource
@@ -185,9 +192,6 @@ int main(int argc, char *argv[])
         if (shouldRender)
         {
             shouldRender = false;
-
-            // Clear frame
-
             // Process inputs
             processInput(window);
             camera->ProcessInput(window, deltaTime);
@@ -224,7 +228,7 @@ int main(int argc, char *argv[])
             occlusionShader.setUniform("view", view);
             occlusionShader.setUniform("projection", projection);
 
-            render(occlusionShader, RENDER_LIGHTOCCLUSION);
+            render(occlusionShader, RENDER_LIGHTOCCLUSION, MODEL_DEFAULT | MODEL_LIGHTSOURCE);
 
             bindTexture(OCCLUSION_MAP);
 
@@ -275,23 +279,26 @@ int main(int argc, char *argv[])
             {
                 bindFramebuffer(POSTPROCESS);
                 glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-                // Render background // TODO: Change this to be a skybox, not a flat texture
-                horizonShader.setActive();
-                renderScreenQuad(screenShader);
-                glClear(GL_DEPTH_BUFFER_BIT); // Clear depth so everything goes in front of horizon
-                
+
+                glDepthMask(GL_FALSE); // TODO: Render last?
+                glActiveTexture(GL_TEXTURE0 + FRAMEBUFFER_COUNT); // TODO: non-fb tex enum
+                glBindTexture(GL_TEXTURE_CUBE_MAP, skyTexture);
+                skyboxShader.setActive();
+                skyboxShader.setUniform("skyboxTex", FRAMEBUFFER_COUNT);
+                skyboxShader.setUniform("projection", projection);
+                skyboxShader.setUniform("view", glm::mat4(glm::mat3(view)));
+                render(skyboxShader, 0, MODEL_SKYBOX);
+                glDepthMask(GL_TRUE);
+
                 //Main render
                 shader.setActive();
                 shader.setUniform("shadowMap", DEPTH_MAP);
                 shader.setUniform("lightraysTex", LIGHTRAYS_MAP);
                 shader.setUniform("lightView", lightViewMatrix);
                 shader.setUniform("lightDir", lightDirection);
-                shader.setUniform("lightScreenPos", sunScreenPos);
                 
-                // Projection
+                // Projection / view
                 shader.setUniform("projection", projection);
-                
-                // View
                 shader.setUniform("view", view);
 
                 render(shader, RENDER_NORM | RENDER_COLOR, MODEL_DEFAULT);
@@ -301,11 +308,11 @@ int main(int argc, char *argv[])
                 glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
                 // Sun render (postprocessing pass for bloom)
                 // TODO: Rename this to just "postShader" or something like that
-                sunShader.setActive();
-                sunShader.setUniform("screenTex", POSTPROCESS);
-                sunShader.setUniform("bloomTex", OCCLUSION_MAP);
-                sunShader.setUniform("sunColor", sunColor);
-                renderScreenQuad(sunShader);
+                postShader.setActive();
+                postShader.setUniform("screenTex", POSTPROCESS);
+                postShader.setUniform("bloomTex", OCCLUSION_MAP);
+                postShader.setUniform("sunColor", sunColor);
+                renderScreenQuad(postShader);
             } 
             
             // Swap buffers and poll events
@@ -323,7 +330,7 @@ int main(int argc, char *argv[])
     glDeleteFramebuffers(FRAMEBUFFER_COUNT, FBOs);
     glDeleteTextures(FRAMEBUFFER_COUNT, FTexs);
 
-    // Missing a lot of shaders lmao
+    // Calling this deletes all shaders
     shader.deleteProgram();
 
     glfwTerminate();
@@ -465,47 +472,16 @@ GLFWwindow* initializeAndCreateWindow(int screenWidth, int screenHeight, const c
 bool compileShaders()
 {
     shader = Shader("shaders/base/flatShader.vs", 
-        DebugActive(DEBUG_DRAW_NORMS) ? "shaders/base/normShader.fs" : "shaders/base/flatShader.fs");
-    if (!shader.isValid) {
-        cerr << "Error when compiling base shader" << endl;
-        return false; }
+        DebugActive(DEBUG_DRAW_NORMS) ? "shaders/base/normShader.fs" : "shaders/base/flatShader.fs", "base shader");
+    postShader = Shader("shaders/postprocess/screenShader.vs", "shaders/postprocess/postShader.fs", "postprocess shader");
+    occlusionShader = Shader("shaders/occlusion/occlusionShader.vs", "shaders/occlusion/occlusionShader.fs", "occlusion shader");
+    depthShader = Shader("shaders/depth/depthShader.vs", "shaders/depth/depthShader.fs", "depth shader");
+    screenShader = Shader("shaders/postprocess/screenShader.vs", "shaders/postprocess/screenShader.fs", "screen shader");
+    radialShader = Shader("shaders/postprocess/screenShader.vs", "shaders/postprocess/radialBlurShader.fs", "radial blur shader");
+    bloomShader = Shader("shaders/postprocess/screenShader.vs", "shaders/postprocess/bloomShader.fs", "bloom shader");
+    skyboxShader = Shader("shaders/horizon/skyboxShader.vs", "shaders/horizon/skyboxShader.fs", "skybox shader");
 
-    sunShader = Shader("shaders/postprocess/screenShader.vs", "shaders/sun/sunShader.fs");
-    if (!sunShader.isValid) {
-        cerr << "Error when compiling sun shader" << endl;
-        return false; }
-
-    occlusionShader = Shader("shaders/occlusion/occlusionShader.vs", "shaders/occlusion/occlusionShader.fs");
-    if (!occlusionShader.isValid) {
-        cerr << "Error when compiling sun shader" << endl;
-        return false; }
-
-    depthShader = Shader("shaders/depth/depthShader.vs", "shaders/depth/depthShader.fs");
-    if (!depthShader.isValid) {
-        cerr << "Error when compiling depth shader" << endl;
-        return false; }
-
-    screenShader = Shader("shaders/postprocess/screenShader.vs", "shaders/postprocess/screenShader.fs");
-    if (!screenShader.isValid) {
-        cerr << "Error when compiling screen shader" << endl;
-        return false; }
-
-    radialShader = Shader("shaders/postprocess/screenShader.vs", "shaders/postprocess/radialBlurShader.fs");
-    if (!radialShader.isValid) {
-        cerr << "Error when compiling radial blur shader" << endl;
-        return false; }
-
-    horizonShader = Shader("shaders/postprocess/screenShader.vs", "shaders/horizon/horizonShader.fs");
-        if (!horizonShader.isValid) {
-            cerr << "Error when compiling horizon shader" << endl;
-            return false; }
-
-    bloomShader = Shader("shaders/postprocess/screenShader.vs", "shaders/postprocess/bloomShader.fs");
-        if (!bloomShader.isValid) {
-            cerr << "Error when compiling bloom shader" << endl;
-            return false; }
-
-    return true;
+    return shader.shadersValid;
 }
 
 unsigned int genBuffers(int bufferCount, 
@@ -548,7 +524,7 @@ unsigned int genBuffers(int bufferCount,
     // Other textures (that use color)
     for (int i = 1; i < FRAMEBUFFER_COUNT; i++)
     {
-        glActiveTexture(GL_TEXTURE0 + i);
+        //glActiveTexture(GL_TEXTURE0 + i);
         glBindTexture(GL_TEXTURE_2D, FTexs[i]);
 
             // TODO: WHAT TO DO ABOUT RESIZING?
@@ -562,17 +538,42 @@ unsigned int genBuffers(int bufferCount,
     
         glBindFramebuffer(GL_FRAMEBUFFER, FBOs[i]);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, FTexs[i], 0);
+
+        if (i <= OCCLUSION_MAP)
+        {
+            unsigned int rbo;
+            glGenRenderbuffers(1, &rbo);
+            glBindRenderbuffer(GL_RENDERBUFFER, rbo); 
+            glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, SCREEN_WIDTH, SCREEN_HEIGHT);  
+            glBindRenderbuffer(GL_RENDERBUFFER, 0);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo);
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);  
+        }
+            
+    }
+    return 1;
+}
+
+unsigned int genTextures()
+{
+    Image skyTex = generateSkybox(1024);
+    
+    glGenTextures(1, &skyTexture);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, skyTexture);
+
+    for (unsigned int i = 0; i < 6; i++)
+    {
+        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 
+                        0, GL_RGB, skyTex.width, skyTex.height, 0, GL_RGB, GL_UNSIGNED_BYTE, skyTex.data);
     }
 
-    // TODO: Depth buffers, different sizes?
-    // unsigned int rbo;
-    // glGenRenderbuffers(1, &rbo);
-    // glBindRenderbuffer(GL_RENDERBUFFER, rbo); 
-    // glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, SCREEN_WIDTH, SCREEN_HEIGHT);  
-    // glBindRenderbuffer(GL_RENDERBUFFER, 0);
-    // glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo);
-    // glBindFramebuffer(GL_FRAMEBUFFER, 0);  
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
 
+    deleteImage(skyTex);
     return 1;
 }
 

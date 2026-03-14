@@ -21,12 +21,15 @@ unsigned int createModel(int index, vector<float>& vertices, vector<int>& indice
             createModelSun(vertices, indices, modelData, triangleCount);
             break;
         case 1:
-            createModelGround(vertices, indices, modelData, triangleCount);
+            createModelSkybox(vertices, indices, modelData, triangleCount);
             break;
         case 2:
-            createModelTrunk(vertices, indices, modelData, triangleCount, vec3(0.2, 0, 0));
+            createModelGround(vertices, indices, modelData, triangleCount);
             break;
         case 3:
+            createModelTrunk(vertices, indices, modelData, triangleCount, vec3(0.2, 0, 0));
+            break;
+        case 4:
             createModelTrunk(vertices, indices, modelData, triangleCount, vec3(-0.2, 0, 0));
             break;
         default:
@@ -145,21 +148,66 @@ void createModelGround(vector<float>& vertices, vector<int>& indices,
         
     modelData.modelType |= MODEL_DEFAULT;
 
+    float groundBounds = 10.0f;
+
     vector<float> preVertices = {
-            1.0, 0.0f, 1.0f,
-            1.0, 0.0f, -1.0f, 
-            -1.0f, 0.0f, -1.0f,
-            -1.0, 0.0f, 1.0f, 
+            0.0, 0.0, 0.0,
+            groundBounds, 0.0f, groundBounds,
+            groundBounds, 0.0f, -groundBounds, 
+            -groundBounds, 0.0f, -groundBounds,
+            -groundBounds, 0.0f, groundBounds, 
         };
 
     vector<int> preIndices = {
-            0, 1, 3,
-            1, 2, 3
+            0, 1, 2,
+            0, 2, 3,
+            0, 3, 4,
+            0, 4, 1,
         };
 
     fillVertexNormals(preVertices, preIndices, vertices, indices, triangleCount);
     modelData.color = vec3(0.0f, 0.3f, 0.0f);
 }
+
+void createModelSkybox(vector<float>& vertices, vector<int>& indices, 
+    ModelData& modelData, int& triangleCount) {
+        
+    modelData.modelType |= MODEL_SKYBOX;
+
+    vector<float> preVertices = {
+        -1, -1, -1,
+        -1, -1, 1,
+        -1, 1, -1,
+        -1, 1, 1,
+        1, -1, -1,
+        1, -1, 1,
+        1, 1, -1,
+        1, 1, 1
+    };
+
+    vector<int> preIndices = {
+            2, 0, 4,
+            2, 4, 6,
+
+            1, 0, 2,
+            1, 2, 3,
+
+            4, 5, 7,
+            4, 7, 6,
+
+            1, 3, 7,
+            1, 7, 5,
+
+            2, 6, 7,
+            2, 7, 3,
+
+            4, 0, 1,
+            4, 1, 5,
+        };
+
+    fillVertexNormals(preVertices, preIndices, vertices, indices, triangleCount);
+}
+
 
 // ████████╗██████╗ ███████╗███████╗
 // ╚══██╔══╝██╔══██╗██╔════╝██╔════╝

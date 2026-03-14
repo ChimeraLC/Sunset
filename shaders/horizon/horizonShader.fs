@@ -9,4 +9,6 @@ void main()
     vec3 backgroundColorLow = vec3(0.75, 0.4, 0.4);
     fragColor = vec4(texPos.y / 1.5 * backgroundColorHigh + (1 - texPos.y / 1.5) * backgroundColorLow
     , 1.0f);
+    
+    fragColor = vec4(backgroundColorHigh, 1.0f);
 } 

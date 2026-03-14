@@ -9,12 +9,15 @@ class Shader
 {
     public:
         Shader();
-        Shader(string vertexPath, string fragmentPath);
-        
-        bool isValid;
+        Shader(string vertexPath, string fragmentPath, string _shaderName);
+
+        static bool shadersValid;
 
         void setActive() const;
-        void deleteProgram() { glDeleteProgram(shaderProgram); }
+        void deleteProgram() { 
+            for (Shader* shader : shaders)
+                glDeleteProgram(shader->shaderProgram); 
+        }
 
         void setUniform(const string name, bool value) const;
         void setUniform(const string name, int value) const;
@@ -25,5 +28,7 @@ class Shader
         void setUniform(const string name, mat4 value) const;
 
     private:
+        static vector<Shader*> shaders;
         unsigned int shaderProgram;
+        string shaderName;
 };

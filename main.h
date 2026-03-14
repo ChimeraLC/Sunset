@@ -13,17 +13,19 @@ bool compileShaders();
 
 unsigned int genBuffers(int bufferCount, 
     unsigned int (&VBOs)[], unsigned int (&VAOs)[], unsigned int (&EBOs)[], unsigned int& quadVBO);
+unsigned int genTextures();
 
 unsigned int bindBuffer(int bufferIndex, unsigned int (&VBOs)[], unsigned int (&VAOs)[], 
         unsigned int (&EBOs)[], vector<float> vertices, vector<int> indices);
 
 enum TextureBuffer {
     DEPTH_MAP,
-    OCCLUSION_MAP,
+    POSTPROCESS,    
+    OCCLUSION_MAP,  // Everything before Occlusion Map gets a depth buffer
     LIGHTRAYS_MAP,
-    POSTPROCESS,
     TEMPORARY_A,
     BLOOM,
+    SKYBOX,         // Prerendered textures
     FRAMEBUFFER_COUNT,
 };
 void bindFramebuffer(TextureBuffer buffer);
@@ -38,7 +40,7 @@ enum RenderFlags {
     RENDER_LIGHTOCCLUSION = 0x04,
 };
 
-void render(Shader shader, unsigned int renderflags, unsigned int drawflags = ~0);
+void render(Shader shader, unsigned int renderflags, unsigned int drawflags);
 void renderScreenQuad(Shader shader);
 
 // Callback functions

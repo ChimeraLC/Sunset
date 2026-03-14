@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <vector>
 #include <string>
 
 #include <glm/glm.hpp>
@@ -13,8 +14,13 @@
 using namespace std;
 using namespace glm;
 
-Shader::Shader(string vertexPath, string fragmentPath)
+vector<Shader*> Shader::shaders = {};
+bool Shader::shadersValid = true;
+
+Shader::Shader(string vertexPath, string fragmentPath, string _shaderName)
 {
+    shaderName = _shaderName;
+
     string vertexString;
     string fragmentString;
     const char* vertexCode;
@@ -47,8 +53,9 @@ Shader::Shader(string vertexPath, string fragmentPath)
     }
     catch (ifstream::failure& e)
     {
+        cerr << "Error when compiling " << shaderName << endl;
         cerr << "Failed to read shader files:\n " << e.what() << endl;
-        isValid = false;
+        shadersValid = false;
         return;
     }
 
@@ -63,8 +70,9 @@ Shader::Shader(string vertexPath, string fragmentPath)
     if (!success)
     {
         glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
+        cerr << "Error when compiling " << shaderName << endl;
         std::cerr << "Vertex compilation failed:\n" << infoLog << std::endl;
-        isValid = false;
+        shadersValid = false;
         return;
     }
 
@@ -76,8 +84,9 @@ Shader::Shader(string vertexPath, string fragmentPath)
     if (!success)
     {
         glGetShaderInfoLog(fragmentShader, 512, NULL, infoLog);
+        cerr << "Error when compiling " << shaderName << endl;
         std::cerr << "Fragment compilation failed:\n" << infoLog << std::endl;
-        isValid = false;
+        shadersValid = false;
         return;
     }
     
@@ -94,17 +103,17 @@ Shader::Shader(string vertexPath, string fragmentPath)
     glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
     if (!success) {
         glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
+        cerr << "Error when compiling " << shaderName << endl;
         std::cerr << "Shader linking failed:\n" << infoLog << std::endl;
-        isValid = false;
+        shadersValid = false;
         return;
     }
 
-    isValid = true;
+    shaders.push_back(this);
 }
 
 Shader::Shader()
 {
-    isValid = false;
 }
 
 void Shader::setActive() const

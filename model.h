@@ -5,6 +5,7 @@
 enum ModelType {
 	MODEL_DEFAULT = 0x01,
 	MODEL_LIGHTSOURCE = 0x02,
+	MODEL_SKYBOX = 0x04,
 };
 
 struct ModelData {
@@ -25,6 +26,8 @@ void fillVertexNormals(std::vector<float> const& preVertices,
 	int& triangleCount);
 
 void createModelGround(std::vector<float>& vertices, std::vector<int>& indices, 
+	ModelData& modelData, int& triangleCount);
+void createModelSkybox(std::vector<float>& vertices, std::vector<int>& indices, 
 	ModelData& modelData, int& triangleCount);
 void createModelSun(std::vector<float>& vertices, std::vector<int>& indices, 
 	ModelData& modelData, int& triangleCount);
