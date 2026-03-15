@@ -33,7 +33,7 @@ const float ASPECT_RATIO = (float) SCREEN_WIDTH / (float) SCREEN_HEIGHT;
 const float FRAMERATE = 40.0f;
 const float PER_FRAME = 1 / FRAMERATE;
 
-const int SHADOW_RESOLUTION = 2048;
+const int SHADOW_RESOLUTION = 4096;
 const int SHADOW_RT_DOWNSCALE = 4;
 
 const float COLOR_WHITE[] = {1.0, 1.0, 1.0, 1.0};
@@ -108,13 +108,14 @@ int main(int argc, char *argv[])
     PrintLog("Generating models");
 
     // Generic scene info
-    sunDirection = normalize(vec3(3, 1, 4));
+    sunDirection = normalize(vec3(3, 2, 4));
     vec3 lightDirection = -sunDirection;
     sunTransform = mat4(1.0f);
     // Sun is visually lower than the actual lightsource TODO: Fix sun position
-    vec3 sunPosition = sunDirection * sunRenderDist - vec3(0, 1, 0);
+    vec3 sunPosition = sunDirection * sunRenderDist;
+    sunPosition.y = 0.5f;
     sunTransform = translate(sunTransform, sunPosition);
-    sunTransform *= inverse(lookAt(lightDirection, sunDirection, vec3(0, 1, 0)));
+    sunTransform *= inverse(lookAt(lightDirection, sunDirection, WORLD_UP));
 
     // Individual models
     if (!genModels(VBOs, EBOs))
@@ -140,7 +141,7 @@ int main(int argc, char *argv[])
 
     // Light view matrix (currently, this doesn't change)
     mat4 lightProjection, lightView;
-    lightProjection = ortho(-1.0f, 1.0f, -1.0f, 1.0f, nearPlane, farPlane);
+    lightProjection = ortho(-3.0f, 3.0f, -1.0f, 1.0f, nearPlane, farPlane);
     lightView = lookAt(sunDirection * sunShadowDist, vec3(0.0f), vec3(0.0, 1.0, 0.0));
     lightViewMatrix = lightProjection * lightView;
 
@@ -654,7 +655,7 @@ unsigned int genTextures()
 
 unsigned int bindBuffer(int bufferIndex, unsigned int (&VBOs)[], unsigned int (&VAOs)[], 
         unsigned int (&EBOs)[], vector<float> vertices, vector<int> indices,
-        bool hasInstanceData = false, vector<float> instanceData = {})
+        bool hasInstanceData = false, vector<mat4> instanceData = {})
 {
     glBindVertexArray(VAOs[bufferIndex]);
     glBindBuffer(GL_ARRAY_BUFFER, VBOs[bufferIndex]);
@@ -677,10 +678,19 @@ unsigned int bindBuffer(int bufferIndex, unsigned int (&VBOs)[], unsigned int (&
         unsigned int instanceVBO;
         glGenBuffers(1, &instanceVBO);
         glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
-        glBufferData(GL_ARRAY_BUFFER, instanceData.size() * sizeof(float), &instanceData[0], GL_STATIC_DRAW);
-        glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+        glBufferData(GL_ARRAY_BUFFER, instanceData.size() * sizeof(mat4), &instanceData[0], GL_STATIC_DRAW);
+        glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(mat4), (void*)0);
         glEnableVertexAttribArray(2);
         glVertexAttribDivisor(2, 1);  
+        glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(mat4), (void*)(1 * sizeof(vec4)));
+        glEnableVertexAttribArray(3);
+        glVertexAttribDivisor(3, 1);  
+        glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, sizeof(mat4), (void*)(2 * sizeof(vec4)));
+        glEnableVertexAttribArray(4);
+        glVertexAttribDivisor(4, 1);  
+        glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(mat4), (void*)(3 * sizeof(vec4)));
+        glEnableVertexAttribArray(5);
+        glVertexAttribDivisor(5, 1);  
     }
 
 
@@ -701,7 +711,8 @@ unsigned int genModels(unsigned int (&VBOs)[], unsigned int (&EBOs)[])
         int triangleCount;
         ModelData modelData;
 
-        if (!createModel(i, vertices, indices, modelData, triangleCount))
+        vector<mat4> instanceData;
+        if (!createModel(i, vertices, indices, modelData, triangleCount, instanceData))
         {
             cerr << "Error when generating model " << i << endl;
             return 0;
@@ -710,22 +721,10 @@ unsigned int genModels(unsigned int (&VBOs)[], unsigned int (&EBOs)[])
         triangleCounts.push_back(triangleCount);
         modelDatas.push_back(modelData);
 
-        vector<float> instanceData;
-        switch(i)
-        {
-            case MODELTYPE_GRASS:
-                for (unsigned int j = 0; j < modelData.instanceCount; j++)
-                {
-                    instanceData.push_back(-0.5 + (float)(j / 10) / 10.0f);
-                    instanceData.push_back(-0.5 + (float)(j % 10) / 10.0f);
-                    instanceData.push_back(17 * j);
-                }
-                bindBuffer(i, VBOs, VAOs, EBOs, vertices, indices, true, instanceData);
-            break;
-            default:
-                bindBuffer(i, VBOs, VAOs, EBOs, vertices, indices);
-            break;
-        }
+        if (i & (MODELTYPE_GRASS | MODELTYPE_LEAVES))
+            bindBuffer(i, VBOs, VAOs, EBOs, vertices, indices, true, instanceData);
+        else
+            bindBuffer(i, VBOs, VAOs, EBOs, vertices, indices);
     }
 
 

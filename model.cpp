@@ -1,4 +1,5 @@
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <vector>
 #include <tuple>
@@ -12,10 +13,8 @@
 using namespace glm;
 using namespace std;
 
-const vec3 VECTOR_ALIGN = vec3(1, 0, 0);
-
 unsigned int createModel(int index, vector<float>& vertices, vector<int>& indices, 
-    ModelData& modelData, int& triangleCount) {
+    ModelData& modelData, int& triangleCount, std::vector<glm::mat4>& instanceData) {
     switch (index)
     {
         case MODELTYPE_SUN:
@@ -31,7 +30,10 @@ unsigned int createModel(int index, vector<float>& vertices, vector<int>& indice
             createModelTrunk(vertices, indices, modelData, triangleCount);
             break;
         case MODELTYPE_GRASS:
-            createModelGrass(vertices, indices, modelData, triangleCount);
+            createModelGrass(vertices, indices, modelData, triangleCount, instanceData);
+            break;
+        case MODELTYPE_LEAVES:
+            createModelLeaves(vertices, indices, modelData, triangleCount, instanceData);
             break;
         default:
             return 0;
@@ -110,14 +112,19 @@ void pushIndices(vector<int>& indices, int index1, int index2, int index3)
     indices.push_back(index3);
 }
 
+void displayVec3(vec3 vector)
+{
+    cout << round(vector.x * 1000) / 1000 << ", " << round(vector.y * 1000) / 1000 
+        << ", " << round(vector.z * 1000) / 1000 << endl;
+}
+
+
 void displayValues(vector<float>& preVertices, vector<int>& preIndices)
 {
     std::cout << "\nVertices:" << endl;
-    for (int i = 0; i < (int) preVertices.size(); i++)
+    for (int i = 0; i < (int) preVertices.size() / 3; i++)
     {
-        if (i > 0 && i % 3 == 0)
-            std::cout << std::endl;
-        std::cout << preVertices[i] << ", ";
+        displayVec3( vec3(preVertices[i * 3], preVertices[i * 3 + 1], preVertices[i * 3 + 2]));
     }
     std::cout << "\nIndices:" << endl;
     for (int i = 0; i < (int) preIndices.size(); i++)
@@ -215,10 +222,10 @@ void createModelSkybox(vector<float>& vertices, vector<int>& indices,
 }
 
 void createModelGrass(vector<float>& vertices, vector<int>& indices, 
-    ModelData& modelData, int& triangleCount) {
+    ModelData& modelData, int& triangleCount, std::vector<glm::mat4>& instanceData) {
         
     modelData.modelType |= MODEL_FOLIAGE;
-    modelData.translation = vec3(0, 0, 0.3);
+    modelData.translation = vec3(0, 0, 0.0);
 
     vector<float> preVertices = {
         0.03, 0, 0,
@@ -233,13 +240,78 @@ void createModelGrass(vector<float>& vertices, vector<int>& indices,
     fillVertexNormals(preVertices, preIndices, vertices, indices, triangleCount);
 
     modelData.color = vec3(0.0f, 0.5f, 0.0f);
-    modelData.instanceCount = 100;
+    int count = 10;
+    modelData.instanceCount = count * count;
+
+    
+    for (unsigned int j = 0; j < modelData.instanceCount; j++)
+    {
+        mat4 model = mat4(1.0f);
+        model = translate(model, glm::vec3(- count / 20 + (float)(j / count) / 10.0f, 
+            0, - count / 20 + (float)(j % count) / 10.0f));
+        model = scale(model, glm::vec3(1.0f, 1.0f, 1.0f));
+        model = rotate(model, 17.0f * j, WORLD_UP);
+        instanceData.push_back(model);
+    }
+}
+
+float leafiness = 150.f;
+float maxHeight = 1.0f;
+vector<mat4> leaves;
+void createModelLeaves(vector<float>& vertices, vector<int>& indices, 
+    ModelData& modelData, int& triangleCount, std::vector<glm::mat4>& instanceData) {
+        
+    modelData.modelType |= MODEL_FOLIAGE;
+    modelData.translation = vec3(0, 0, 0.0);
+
+    vector<float> preVertices = {
+        0, 0, 0,
+        -0.04, 0.01, 0,
+        0.04, 0.01, 0,
+        0, 0.09, 0
+    };
+
+    vector<int> preIndices = {
+            0, 1, 3,
+            0, 3, 2
+    };
+
+    fillVertexNormals(preVertices, preIndices, vertices, indices, triangleCount);
+
+    modelData.color = vec3(0.0f, 0.6f, 0.0f);
+    modelData.instanceCount = leaves.size();
+    instanceData = leaves; // TODO: Is this safe?
+}
+
+// Start and end denote areas leaf could be
+void createLeaf(vec3 startPos, vec3 endPos, vec3 pointing, float probScale = 1.0, bool maxOne = false)
+{
+    for (int i = 1; i < randFloat() * (1 + leafiness * probScale); i++)
+    {
+        mat4 model = mat4(1);
+
+        // Translate
+        model = translate(model, startPos + randFloat() * (endPos - startPos));
+
+        pointing = normalize(pointing);
+        float dotVal = dot(WORLD_UP, pointing);
+        clamp(dotVal,-1.0f,1.0f);
+
+        // Rotate in the general direction
+        vec3 axis = cross(WORLD_UP, pointing);
+        model = rotate(model, randFloat() * PI, WORLD_UP); // I don't know the math TT
+        model = rotate(model, glm::acos(dotVal),axis);
+        leaves.push_back(model);
+    
+        if (maxOne)
+            return;
+    }
 }
 // MARK: TREE
 
 // Creates a tree ring of points; returns start point of the ring
 // Currently is not orriented any way
-int createTreeRing(vec3 ringCenter, vec3 inDirection, float radius, int sides, vector<float>& vertices)
+int createTreeRing(vec3 ringCenter, vec3 inDirection, float radius, int sides, vector<float>& vertices, int overrideIndex = -1)
 {
     // First index is always aligned along vec3(1, 0, 0)
     vec3 right = normalize(cross(inDirection, VECTOR_ALIGN));
@@ -251,7 +323,15 @@ int createTreeRing(vec3 ringCenter, vec3 inDirection, float radius, int sides, v
     for (int i = 0; i < sides; i++)
     {
         vec3 offset = radius * (cos(angle * i) * forward + sin(angle * i) * right);
-        pushVertex(vertices, ringCenter + offset);
+        vec3 newPoint = ringCenter + offset;
+        if (overrideIndex == -1)
+            pushVertex(vertices, newPoint);
+        else
+        {
+            vertices[(overrideIndex + i) * 3] = newPoint.x;
+            vertices[(overrideIndex + i) * 3 + 1] = newPoint.y;
+            vertices[(overrideIndex + i) * 3 + 2] = newPoint.z;
+        }
     }
 
     return startIndex;
@@ -259,37 +339,63 @@ int createTreeRing(vec3 ringCenter, vec3 inDirection, float radius, int sides, v
 
 // Adds the necessary triangles to connect two tree rings
 // Currently assumes sides and orrentation is the same
-void connectTreeRings(int indexA, int indexB, int sides,
-        vector<int>& indices)
+void connectTreeRings(vec3 startPoint, vec3 endPoint, int indexA, int indexB, int sides,
+        vector<float>& vertices, vector<int>& indices)
 {
+    float branchLength = length(endPoint - startPoint);
     for (int i = 0; i < sides; i++)
     {
         int left = i;
         int right = (i + 1) % sides;
         pushIndices(indices, indexA + left, indexA + right, indexB + left);
         pushIndices(indices, indexA + right, indexB + right, indexB + left);
+        
+        // Add leaves along edge
+        vec3 baseVertex = getVertex(vertices, indexA + left);
+        vec3 endVertex = getVertex(vertices, indexB + left);
+        vec3 fromCenter = baseVertex - startPoint;
+        vec3 toEnd = endVertex - baseVertex;
+        vec3 out = cross(toEnd, cross(fromCenter, baseVertex));
+        // More leaves near the top, equal amounts per branch lengths, and irrespective of sidecount
+        float heightFactor = ((baseVertex + endVertex) / 2.f).y / maxHeight;
+        heightFactor = clamp(2 * heightFactor - 0.5f, 0.f, 1.f);
+        createLeaf(baseVertex, endVertex, out, heightFactor * branchLength / sides);
     }
 }
 
 //Ends off a tree branch; should work the same as connectTreeRings with sidesB = 1
 // Index A is a ring, index B is a single point
-void capBranch(vec3 branchEnd, int indexA, int sides,
+void capBranch(vec3 branchStart, vec3 branchEnd, int indexA, int sides,
         vector<float>&vertices, vector<int>& indices)
 {
     int startIndex = vertices.size() / 3;
 
     pushVertex(vertices, branchEnd);
 
+    float branchLength = length(branchStart - branchEnd);
+
     for (int i = 0; i < sides; i++)
     {
         int left = i;
         int right = (i + 1) % sides;
         pushIndices(indices, indexA + left, indexA + right, startIndex);
+
+        // Add leaves along edge
+        vec3 baseVertex = getVertex(vertices, indexA + left);
+        vec3 fromCenter = baseVertex - branchStart;
+        vec3 toEnd = branchEnd - baseVertex;
+        vec3 out = cross(toEnd, cross(fromCenter, baseVertex));
+        // More leaves near the top, equal amounts per branch lengths, and irrespective of sidecount
+        float heightFactor = ((baseVertex + branchEnd) / 2.f).y / maxHeight;
+        heightFactor = clamp(2 * heightFactor - 0.3f, 0.f, 1.f);
+        createLeaf(baseVertex, branchEnd, out, heightFactor * branchLength / sides);
     }
+    // Create leaves at ends
+    createLeaf(branchEnd, branchEnd, branchEnd-branchStart, branchEnd.y / maxHeight, true);
 }
 
 //Splits a ring into two branch points (split direction is perpendicular to line split on)
-void splitTreeRing(int index, vec3 splitDirection, int& outIndexA, int& outIndexB, int sides,
+void splitTreeRing(vec3 startPos, int index, vec3 splitDirection, int& outIndexA, int& outIndexB, int sides,
     vector<float>&vertices, vector<int>& indices)
 {
     // These values are always a given
@@ -299,9 +405,7 @@ void splitTreeRing(int index, vec3 splitDirection, int& outIndexA, int& outIndex
     outIndexB = startIndex + sides;
     
     // Find split index point
-    vec3 center = vec3(0);
-    for (int i = 0; i < sides; i++) {center += getVertex(vertices, index + i);}
-    center /= sides;
+    vec3 center = startPos;
 
     float closestDot = -FLT_MAX; int closest = 0;
     float alignedDot = -FLT_MAX; int mostAligned = 0; // Also track most aligned to (1, 0, 0);
@@ -374,7 +478,7 @@ void splitTreeRing(int index, vec3 splitDirection, int& outIndexA, int& outIndex
 
     
     // Aligning towards (1, 0, 0); making an estimate based on pre-split ring
-    int offset = mostAligned;
+    int offset = mostAligned + closest;
     // Forward side partition
     for (int i = 0; i < sides; i++)
     {   
@@ -385,7 +489,7 @@ void splitTreeRing(int index, vec3 splitDirection, int& outIndexA, int& outIndex
             pushVertex(vertices, getVertex(vertices, index + (closest + trueIndex) % sides));
     }
 
-    offset = (mostAligned + (sides / 2)) % sides;
+    offset = (mostAligned + closest + (sides / 2)) % sides;
     // Reverse side partition
     for (int i = 0; i < sides; i++)
     {
@@ -401,14 +505,148 @@ void splitTreeRing(int index, vec3 splitDirection, int& outIndexA, int& outIndex
 
 }
 
+// TODO: Creating a bunch of new vectors cannot be efficient, although since the count is so low
+// it might be fine
+void splitPoints(vector<vec2> inPoints, vector<vec2>& outPointsA, vector<vec2>& outPointsB)
+{
+    float farLeft = FLT_MAX;
+    float farRight = -FLT_MAX;
+    float center = 0;
+    for (unsigned int i = 0; i < inPoints.size(); i++)
+    {
+        farLeft = std::min(inPoints[i].x, farLeft);
+        farRight = std::max(inPoints[i].x, farRight);
+        center += inPoints[i].x;
+    }
+    center = center / inPoints.size();
+
+    // Split left and right of center, close to center are random
+    float range = farRight - farLeft;
+    float tossupLeft = farLeft + range * 0.45;
+    float tossupRight = farLeft + range * 0.55;
+
+    for (vec2 point : inPoints)
+    {
+        if (point.x < tossupLeft)
+        {
+            outPointsA.push_back(point);
+        }
+        else if (point.x > tossupRight)
+        {
+            outPointsB.push_back(point);
+        }
+        else
+        {
+            float prop = (point.x - tossupLeft) / (range * 0.1f);
+            if (randFloat() < prop)
+                outPointsB.push_back(point);
+            else
+                outPointsA.push_back(point);
+        }
+    }
+
+    // TODO: Delete inPoints when done?
+}
+
+// Generates a new outgoing branch direction based on incoming direction
+vec3 treeNewDirection(vec3 inDirection, vec3 startPoint, vec2 endPoint)
+{
+    vec3 newPoint = vec3(endPoint.x, endPoint.y, startPoint.z);
+    float branchLength = length(newPoint - startPoint);
+
+    newPoint.z += (inDirection.z + randFloat() / 4 - 0.125f) * branchLength;
+
+    return newPoint;
+}
+
+const int sides = 8;
+void createModelSubtree(vec3 startPoint, vec3 inDirection, int startIndex, vector<vec2> inPoints, float radius, vector<float>& preVertices, vector<int>& preIndices,
+    bool forceUnsplit = false, bool justForced = false)
+{
+    inDirection = normalize(inDirection);
+    if (inPoints.size() == 0) // Cap off
+    {
+        vec3 newPoint = treeNewDirection(inDirection, startPoint, startPoint + 
+                inDirection * (0.1f + randFloat() * 0.1f) + vec3(0, randFloat() * 0.05f, 0));
+        capBranch(startPoint, newPoint, startIndex, sides, preVertices, preIndices);
+    }
+    else if (inPoints.size() == 1 || forceUnsplit)
+    {
+        vec2 inPoint = inPoints[inPoints.size() - 1];
+
+        radius *= 0.7f + randFloat() * 0.1f;
+
+        vec3 newPoint = treeNewDirection(inDirection, startPoint, inPoint);
+
+        vec3 newInDirection = inDirection + normalize(newPoint - startPoint);
+        newInDirection = normalize(newInDirection);
+        createTreeRing(startPoint, newInDirection, radius, sides, preVertices, startIndex);
+
+        int index = createTreeRing(newPoint, newPoint - startPoint,
+        radius, sides, preVertices);
+        connectTreeRings(startPoint, newPoint, startIndex, index, sides, preVertices, preIndices);
+
+        inPoints.pop_back();
+        createModelSubtree(newPoint, newPoint-startPoint, index, inPoints, radius, preVertices, preIndices, false, forceUnsplit);
+        // TODO: Decrease size with time
+    }
+    else
+    {
+        vector<vec2> leftPoints;
+        vector<vec2> rightPoints;
+        splitPoints(inPoints, leftPoints, rightPoints);             // Can't unsplit twice in a row
+        if (leftPoints.size() == 0 || rightPoints.size() == 0 || (inPoints.size() > 3 && !justForced && randFloat() < 0.4f))
+        {
+            // Do stuff here
+            createModelSubtree(startPoint, inDirection, startIndex, inPoints, radius, preVertices, preIndices, true);
+        }
+        else
+        {
+            vec2 rightPoint = rightPoints[rightPoints.size() - 1];
+            vec2 leftPoint = leftPoints[leftPoints.size() - 1];
+            vec3 newPointRight = treeNewDirection(inDirection, startPoint, rightPoint);
+            vec3 newPointLeft = treeNewDirection(inDirection, startPoint, leftPoint);
+            vec3 splitDirection = newPointLeft - newPointRight; // TODO: Calculate this better once z != 0
+            
+            if (normalize(newPointRight - startPoint).x > normalize(newPointLeft - startPoint).x)
+                splitDirection = -splitDirection;
+
+            // Regenerate ring based on outgoing directions
+            vec3 newInDirection = inDirection + normalize(newPointRight + newPointLeft - 2.0f * startPoint);
+            newInDirection = normalize(newInDirection);
+            createTreeRing(startPoint, newInDirection, radius, sides, preVertices, startIndex);
+
+            // Split base
+            int indexSplitL, indexSplitR;
+            splitTreeRing(startPoint, startIndex, splitDirection, indexSplitR, indexSplitL, sides, preVertices, preIndices);
+
+            // Create new branches
+            radius *= 0.6f; // Radius reduced significantly on branching
+            float radiusLeft = radius * (0.7f + randFloat() * 0.15f);
+            float radiusRight = radius * (0.7f + randFloat() * 0.15f);
+
+            int indexL = createTreeRing(newPointLeft, newPointLeft-startPoint, 
+                    radiusLeft, sides, preVertices);
+            int indexR = createTreeRing(newPointRight, newPointRight-startPoint, 
+                    radiusRight, sides, preVertices);
+            connectTreeRings(startPoint, newPointLeft, indexSplitL, indexL, sides, preVertices, preIndices);
+            connectTreeRings(startPoint, newPointRight, indexSplitR, indexR, sides, preVertices, preIndices);
+
+            leftPoints.pop_back();
+            rightPoints.pop_back();
+            createModelSubtree(newPointLeft, newPointLeft-startPoint, indexL, leftPoints, radiusLeft, preVertices, preIndices);
+            createModelSubtree(newPointRight, newPointRight-startPoint, indexR, rightPoints, radiusRight, preVertices, preIndices);
+        }
+    }
+}
+
 void createModelTrunk(vector<float>& vertices, vector<int>& indices, 
     ModelData& modelData, int& triangleCount) {
 
     modelData.modelType |= MODEL_DEFAULT;
     modelData.color = vec3(0.6f, 0.3f, 0.0f);
-    modelData.translation = vec3(0.0f);;
+    modelData.translation = vec3(0.0f);
     
-    int sides = 12;
 
     if (sides % 2 == 1)
         cerr << "sides cannot be odd" << endl;
@@ -416,17 +654,22 @@ void createModelTrunk(vector<float>& vertices, vector<int>& indices,
     vector<float> preVertices;
     vector<int> preIndices;
 
-    int indexA = createTreeRing(vec3(0), vec3(0, 1, 0), 0.1f, sides, preVertices);
-    int indexB = createTreeRing(vec3(0.2, 0.5, 0), vec3(0.25, 1, 0), 0.08f, sides, preVertices);
-    // int indexC = createTreeRing(vec3(0, 0.5, 0), 0.05f, sides, preVertices);
-    
-    int indexC, indexD;
-    splitTreeRing(indexA, vec3(0.5, 0, 0.5), indexC, indexD, sides, preVertices, preIndices);
-    //connectTreeRings(indexA, indexB, sides, preIndices);
-    connectTreeRings(indexC, indexB, sides, preIndices);
+    // Input vector of points generated based on input texture (latter is TODO)
+    // Ordered from highest to lowest. z will be random~ish
+    vector<vec2> inputPoints = { vec2(0.2, 0.7), vec2(-0.1, 0.7), vec2(0.25, 0.65), vec2(-0.3, 0.65), vec2(-0.2, 0.6), vec2(0.2, 0.6), vec2(0, 0.3)};
+    maxHeight = inputPoints[0].y;
 
-    capBranch(vec3(0.6f, 0.9f, 0.0f), indexB, sides, preVertices, preIndices);
-    capBranch(vec3(-0.1f, 0.9f, 0.0f), indexD, sides, preVertices, preIndices);
+    // Sanity check
+    for (unsigned int i = 1; i < inputPoints.size(); i++)
+    {
+        if (inputPoints[i].y > inputPoints[i-1].y)
+        {
+            cerr << "tree input points is misordered" << endl;
+        }
+    }
+
+    int startIndex = createTreeRing(vec3(0), vec3(0, 1, 0), 0.125f, sides, preVertices);
+    createModelSubtree(vec3(0), vec3(0, 1, 0), startIndex, inputPoints, 0.125f, preVertices, preIndices, true);
 
     fillVertexNormals(preVertices, preIndices, vertices, indices, triangleCount);
 }

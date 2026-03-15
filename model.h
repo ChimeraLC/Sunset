@@ -15,6 +15,7 @@ enum Models {
 	MODELTYPE_GROUND,
 	MODELTYPE_TRUNK,
 	MODELTYPE_GRASS,
+	MODELTYPE_LEAVES,
 	MODEL_COUNT
 };
 
@@ -28,7 +29,7 @@ struct ModelData {
 
 // Creates the vertices and indices for a model
 unsigned int createModel(int index, std::vector<float>& vertices, std::vector<int>& indices,
-	ModelData& modelData, int& triangleCount);
+	ModelData& modelData, int& triangleCount, std::vector<glm::mat4>& instanceData);
 
 // Based on triangle vertices + indices setup without normals and with repeats, creates full vectors
 void fillVertexNormals(std::vector<float> const& preVertices, 
@@ -45,7 +46,9 @@ void createModelSun(std::vector<float>& vertices, std::vector<int>& indices,
 void createModelTrunk(std::vector<float>& vertices, std::vector<int>& indices, 
 	ModelData& modelData, int& triangleCount);
 void createModelGrass(std::vector<float>& vertices, std::vector<int>& indices, 
-	ModelData& modelData, int& triangleCount);
+	ModelData& modelData, int& triangleCount, std::vector<glm::mat4>& instanceData);
+void createModelLeaves(std::vector<float>& vertices, std::vector<int>& indices, 
+	ModelData& modelData, int& triangleCount, std::vector<glm::mat4>& instanceData);
 
 
 glm::vec3 getNormal(const float* point1, const float* point2, const float* point3);

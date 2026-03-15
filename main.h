@@ -17,7 +17,7 @@ unsigned int genTextures();
 
 unsigned int bindBuffer(int bufferIndex, unsigned int (&VBOs)[], unsigned int (&VAOs)[], 
         unsigned int (&EBOs)[], vector<float> vertices, vector<int> indices,
-        bool hasInstanceData, vector<float> instanceData);
+        bool hasInstanceData, vector<mat4> instanceData);
 
 enum TextureBuffer {
     DEPTH_MAP_PRE,

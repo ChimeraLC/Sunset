@@ -1,7 +1,7 @@
 #version 330 core
 layout (location = 0) in vec3 vertexPos;
 layout (location = 1) in vec3 vertexNorm;
-layout (location = 2) in vec3 vertexOffset;
+layout (location = 2) in mat4 vertexOffset;
 
 out vec3 fragPos;
 out float wind;
@@ -18,18 +18,10 @@ uniform float time;
 
 void main()
 {
-    // This is kind of inefficient, since it never changes
-    mat4 newModel = model;
-    newModel[0][0] = cos(vertexOffset.z);
-    newModel[2][0] = -sin(vertexOffset.z);
-    newModel[0][2] = sin(vertexOffset.z);
-    newModel[2][2] = cos(vertexOffset.z);
-    newModel[3][0] = vertexOffset.x;
-    newModel[3][2] = vertexOffset.y;
 
-    gl_Position = projection * view * newModel * vec4(vertexPos, 1.0);
+    gl_Position = projection * view * vertexOffset * vec4(vertexPos, 1.0);
 
-    fragPos = vec3(newModel * vec4(vertexPos, 1.0));
+    fragPos = vec3(vertexOffset * vec4(vertexPos, 1.0));
     wind = (cos(time + fragPos.x * 2 + sin(time + fragPos.y) * 3)) / 5
         * vertexPos.y;
     
@@ -42,5 +34,5 @@ void main()
     vec4 fragLightPrePos = lightView * vec4(fragPos, 1.0);
     fragLightPos = fragLightPrePos.xyz / fragLightPrePos.w;
 
-    gl_Position.x += wind;
+    gl_Position.x += sign(dot(camView, lightDir)) * wind;
 }
