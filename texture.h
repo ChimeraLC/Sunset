@@ -12,3 +12,4 @@ typedef struct
 void deleteImage(Image image);
 
 Image generateSkybox(int width);
+Image generateMountain(int width);

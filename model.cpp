@@ -12,6 +12,7 @@
 using namespace glm;
 using namespace std;
 
+const vec3 VECTOR_ALIGN = vec3(1, 0, 0);
 
 unsigned int createModel(int index, vector<float>& vertices, vector<int>& indices, 
     ModelData& modelData, int& triangleCount) {
@@ -27,10 +28,7 @@ unsigned int createModel(int index, vector<float>& vertices, vector<int>& indice
             createModelGround(vertices, indices, modelData, triangleCount);
             break;
         case 3:
-            createModelTrunk(vertices, indices, modelData, triangleCount, vec3(0.2, 0, 0));
-            break;
-        case 4:
-            createModelTrunk(vertices, indices, modelData, triangleCount, vec3(-0.2, 0, 0));
+            createModelTrunk(vertices, indices, modelData, triangleCount, vec3(0.0, 0, 0));
             break;
         default:
             return 0;
@@ -76,6 +74,11 @@ void fillVertexNormals(vector<float> const& preVertices,
     }
 }
 
+vec3 getVertex(vector<float>& vertices, int index)
+{
+    return vec3(vertices[index * 3], vertices[index * 3 + 1], vertices[index * 3 + 2]);
+}
+
 // TODO: Does using pointers here really make it that much cleaner
 vec3 getNormal(const float* point1, const float* point2, const float* point3)
 {
@@ -84,13 +87,13 @@ vec3 getNormal(const float* point1, const float* point2, const float* point3)
     return normalize(cross(side1, side2));
 }
 
-void pushTriangle(vector<float>& vertices, float x, float y, float z)
+void pushVertex(vector<float>& vertices, float x, float y, float z)
 {
     vertices.push_back(x);
     vertices.push_back(y);
     vertices.push_back(z);
 }
-void pushTriangle(vector<float>& vertices, vec3 newPoint)
+void pushVertex(vector<float>& vertices, vec3 newPoint)
 {
     vertices.push_back(newPoint.x);
     vertices.push_back(newPoint.y);
@@ -134,7 +137,7 @@ void createModelSun(vector<float>& vertices, vector<int>& indices,
     float angle = PI * 2 / sunSides;
     for (int i = 0; i < sunSides; i++)
     {
-        pushTriangle(preVertices, vec3(cos(angle * (i + 0.5)), sin(angle * (i + 0.5)), 0));
+        pushVertex(preVertices, vec3(cos(angle * (i + 0.5)), sin(angle * (i + 0.5)), 0));
         pushIndices(preIndices, i, i + 1, sunSides - 1);
     }
 
@@ -208,25 +211,26 @@ void createModelSkybox(vector<float>& vertices, vector<int>& indices,
     fillVertexNormals(preVertices, preIndices, vertices, indices, triangleCount);
 }
 
-
-// ████████╗██████╗ ███████╗███████╗
-// ╚══██╔══╝██╔══██╗██╔════╝██╔════╝
-//    ██║   ██████╔╝█████╗  █████╗  
-//    ██║   ██╔══██╗██╔══╝  ██╔══╝  
-//    ██║   ██║  ██║███████╗███████╗
-//    ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝
+// MARK: TREE
 
 // Creates a tree ring of points; returns start point of the ring
 // Currently is not orriented any way
-int createTreeRing(vec3 ringCenter, float radius, int sides, vector<float>& vertices)
+int createTreeRing(vec3 ringCenter, vec3 inDirection, float radius, int sides, vector<float>& vertices)
 {
+    // First index is always aligned along vec3(1, 0, 0)
+    vec3 right = normalize(cross(inDirection, VECTOR_ALIGN));
+    vec3 forward = -normalize(cross(inDirection, right));
+
+    cout << right.x << " " << right.y << " " << right.z << endl;
+    cout << forward.x << " " << forward.y << " " << forward.z << endl;
+
     int startIndex = vertices.size() / 3;
 
-    float angle = -2 * PI / sides; // Wind clockwise
+    float angle = 2 * PI / sides; // Wind clockwise
     for (int i = 0; i < sides; i++)
     {
-        vec3 offset = radius * vec3(cos(angle * i), 0, sin(angle * i));
-        pushTriangle(vertices, ringCenter + offset);
+        vec3 offset = radius * (cos(angle * i) * forward + sin(angle * i) * right);
+        pushVertex(vertices, ringCenter + offset);
     }
 
     return startIndex;
@@ -253,7 +257,7 @@ void capBranch(vec3 branchEnd, int indexA, int sides,
 {
     int startIndex = vertices.size() / 3;
 
-    pushTriangle(vertices, branchEnd);
+    pushVertex(vertices, branchEnd);
 
     for (int i = 0; i < sides; i++)
     {
@@ -263,11 +267,118 @@ void capBranch(vec3 branchEnd, int indexA, int sides,
     }
 }
 
-// // Splits a ring into two branch points
-// void splitTreeRing(int index, int& outIndexA, int& outIndexB, int sides,
-//     vector<float>&vertices, vector<int>& indices)
-// {
-// }
+//Splits a ring into two branch points (split direction is perpendicular to line split on)
+void splitTreeRing(int index, vec3 splitDirection, int& outIndexA, int& outIndexB, int sides,
+    vector<float>&vertices, vector<int>& indices)
+{
+    // These values are always a given
+    int startIndex = vertices.size() / 3;
+    
+    outIndexA = startIndex;
+    outIndexB = startIndex + sides;
+    
+    // Find split index point
+    vec3 center = vec3(0);
+    for (int i = 0; i < sides; i++) {center += getVertex(vertices, index + i);}
+    center /= sides;
+
+    float closestDot = -FLT_MAX; int closest = 0;
+    float alignedDot = -FLT_MAX; int mostAligned = 0; // Also track most aligned to (1, 0, 0);
+    splitDirection = normalize(splitDirection);
+    for (int i = 0; i < sides; i++) {
+        vec3 vecDirection = normalize(getVertex(vertices, index + i) - center);
+        float alignment = dot(vecDirection, splitDirection);
+        if (alignment > closestDot)
+        {
+            closestDot = alignment;
+            closest = i;
+        }
+        alignment = dot(vecDirection, VECTOR_ALIGN);
+        if (alignment > alignedDot)
+        {
+            alignedDot = alignment;
+            mostAligned = 0;
+        }
+    }
+
+    vec3 forward = normalize(getVertex(vertices, index + closest) - center);
+    int rightPart, lowNew, highNew;
+    vec3 newPoints[sides / 2]; // generous bounds, since %4==0 uses one less
+
+    if (sides%4 == 0)
+    {
+        // Winds couterclockwise
+        rightPart = index + (closest + sides / 4) % sides;
+        vec3 right = getVertex(vertices, rightPart) - center;
+        float radius = length(right);
+        right = right / radius;
+
+        // Create extra point
+        vec3 up = cross(forward, right);
+
+        // Add two ring sets, Aligned towards (1, 0, 0)
+        lowNew = sides / 4 + 1; highNew = 3 * sides / 4 - 1;
+
+        float angle = 2 * PI / sides;
+        for (int i = 0; i <= highNew - lowNew; i++)
+        {
+            newPoints[i] = center + radius * (cos(angle * (i + 1)) * right + sin(angle * (i + 1) * up));
+        }
+    }
+    else // sides % 4 == 2
+    {
+        // Winds couterclockwise
+        rightPart = index + (closest + (sides - 2) / 4) % sides;
+        int leftPart = index + (closest + (3 * sides - 2) / 4) % sides;
+        vec3 right = (getVertex(vertices, rightPart) + getVertex(vertices, rightPart + 1)) / 2.0f - center;
+        float radius = length(right);
+        right = right / radius;
+
+        // Create extra point
+        vec3 up = cross(forward, right);
+
+        // Add two ring sets, Aligned towards (1, 0, 0)
+        lowNew = (sides + 2) / 4; highNew = (3 * sides - 2) / 4;
+
+        float angle = 2 * PI / (sides + 2);
+        for (int i = 0; i <= highNew - lowNew; i++)
+        {
+            newPoints[i] = center + radius * (cos(angle * (i + 1)) * right + sin(angle * (i + 1) * up));
+        }
+        
+        // Push fillin triangles
+        pushIndices(indices, rightPart, rightPart + 1, startIndex + (lowNew - mostAligned + sides) % sides); 
+        pushIndices(indices, leftPart, leftPart + 1, startIndex + (highNew - mostAligned + sides) % sides); 
+    }
+
+    
+    // Aligning towards (1, 0, 0); making an estimate based on pre-split ring
+    int offset = mostAligned;
+    // Forward side partition
+    for (int i = 0; i < sides; i++)
+    {   
+        int trueIndex = (offset + i) % sides;
+        if (trueIndex >= lowNew && trueIndex <= highNew)
+            pushVertex(vertices, newPoints[trueIndex - lowNew]);
+        else
+            pushVertex(vertices, getVertex(vertices, index + (closest + trueIndex) % sides));
+    }
+
+    offset = (mostAligned + (sides / 2)) % sides;
+    // Reverse side partition
+    for (int i = 0; i < sides; i++)
+    {
+        int trueIndex = (offset + i) % sides;
+        if (trueIndex >= lowNew && trueIndex <= highNew)
+        {
+            // These newPoints go backwards
+            pushVertex(vertices, newPoints[highNew - trueIndex]);
+        }
+        else
+            pushVertex(vertices, getVertex(vertices, index + (closest + trueIndex + sides / 2) % sides));
+    }
+
+}
 
 void createModelTrunk(vector<float>& vertices, vector<int>& indices, 
     ModelData& modelData, int& triangleCount, vec3 offset = vec3(0)) {
@@ -276,17 +387,27 @@ void createModelTrunk(vector<float>& vertices, vector<int>& indices,
     modelData.color = vec3(0.6f, 0.3f, 0.0f);
     modelData.translation = offset;
     
-    int sides = 10;
+    int sides = 12;
+
+    if (sides % 2 == 1)
+        cerr << "sides cannot be odd" << endl;
 
     vector<float> preVertices;
     vector<int> preIndices;
 
-    int indexA = createTreeRing(vec3(0), 0.1f, sides, preVertices);
-    int indexB = createTreeRing(vec3(0, 0.3, 0), 0.08f, sides, preVertices);
-    int indexC = createTreeRing(vec3(0, 0.5, 0), 0.05f, sides, preVertices);
-    connectTreeRings(indexA, indexB, sides, preIndices);
-    connectTreeRings(indexB, indexC, sides, preIndices);
-    capBranch(vec3(0.1f, 0.6f, 0.0f), indexC, sides, preVertices, preIndices);
+    int indexA = createTreeRing(vec3(0), vec3(0, 1, 0), 0.1f, sides, preVertices);
+    int indexB = createTreeRing(vec3(0.2, 0.5, 0), vec3(0.25, 1, 0), 0.08f, sides, preVertices);
+    // int indexC = createTreeRing(vec3(0, 0.5, 0), 0.05f, sides, preVertices);
+    
+    int indexC, indexD;
+    splitTreeRing(indexA, vec3(0.5, 0, 0.5), indexC, indexD, sides, preVertices, preIndices);
+    //connectTreeRings(indexA, indexB, sides, preIndices);
+    connectTreeRings(indexC, indexB, sides, preIndices);
+
+    capBranch(vec3(0.6f, 0.9f, 0.0f), indexB, sides, preVertices, preIndices);
+    capBranch(vec3(-0.1f, 0.9f, 0.0f), indexD, sides, preVertices, preIndices);
+
+    displayValues(preVertices, preIndices);
 
     fillVertexNormals(preVertices, preIndices, vertices, indices, triangleCount);
 }

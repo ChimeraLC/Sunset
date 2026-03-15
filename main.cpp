@@ -45,7 +45,7 @@ float sunRenderDist = 15;   // Distance sun model is rendered
 vec3 sunColor = vec3(0.9f, 0.30f, 0.35f);
 
 // Global values
-const int bufferCount = 5;
+const int bufferCount = 4;
 unsigned int VAOs[bufferCount], FBOs[FRAMEBUFFER_COUNT], FTexs[FRAMEBUFFER_COUNT];
 unsigned int quadVAO;
 vector<int> triangleCounts;
@@ -107,7 +107,7 @@ int main(int argc, char *argv[])
     sunDirection = normalize(vec3(3, 1, 4));
     vec3 lightDirection = -sunDirection;
     sunTransform = mat4(1.0f);
-    // Sun is visually lower than the actual lightsource
+    // Sun is visually lower than the actual lightsource TODO: Fix sun position
     vec3 sunPosition = sunDirection * sunRenderDist - vec3(0, 1, 0);
     sunTransform = translate(sunTransform, sunPosition);
     sunTransform *= inverse(lookAt(lightDirection, sunDirection, vec3(0, 1, 0)));
@@ -136,7 +136,7 @@ int main(int argc, char *argv[])
     // Create camera
     if (DebugActive(DEBUG_FREEHAND_CAMERA))
     {
-        camera = new FreeCamera(vec3(-2, 0.5f, 0), 0, 0);
+        camera = new FreeCamera(vec3(-2, 0.2f, 0), 0, 0);
     }
     else
     {
@@ -164,7 +164,7 @@ int main(int argc, char *argv[])
     bool shouldRender = true;
 
     PrintLog("Beginning Render Loop");
-    // Render loop
+    // MARK: Render loop
     while(!glfwWindowShouldClose(window))
     {
         // Render
@@ -172,6 +172,7 @@ int main(int argc, char *argv[])
         accumTime += currentTime - prevFrame;
         prevFrame = currentTime;
 
+        // Check framerate
         if (accumTime > PER_FRAME)
         {
             deltaTime = accumTime - fmod(accumTime, PER_FRAME);
@@ -224,12 +225,22 @@ int main(int argc, char *argv[])
             glClearColor(COLOR_BLACK[0], COLOR_BLACK[1], COLOR_BLACK[2], COLOR_BLACK[3]);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+            // Rendering regular models
             occlusionShader.setActive();
             occlusionShader.setUniform("view", view);
             occlusionShader.setUniform("projection", projection);
 
             render(occlusionShader, RENDER_LIGHTOCCLUSION, MODEL_DEFAULT | MODEL_LIGHTSOURCE);
 
+            // Rendering skybox
+            glActiveTexture(GL_TEXTURE0 + FRAMEBUFFER_COUNT); // TODO: non-fb tex enum
+            glBindTexture(GL_TEXTURE_CUBE_MAP, skyTexture);
+            skyboxShader.setActive();
+            skyboxShader.setUniform("skyboxTex", FRAMEBUFFER_COUNT);
+            skyboxShader.setUniform("projection", projection);
+            skyboxShader.setUniform("view", glm::mat4(glm::mat3(view)));
+            skyboxShader.setUniform("occlusionRendering", true);
+            render(skyboxShader, 0, MODEL_SKYBOX);
             bindTexture(OCCLUSION_MAP);
 
             // Lightrays map
@@ -242,34 +253,11 @@ int main(int argc, char *argv[])
             renderScreenQuad(radialShader);
                     
             bindTexture(LIGHTRAYS_MAP);
-
-            // Bloom postprocessing (two pass)
-            bindFramebuffer(TEMPORARY_A);
-            glClear(GL_COLOR_BUFFER_BIT);
-            bloomShader.setActive();
-            bloomShader.setUniform("occlusionTex", OCCLUSION_MAP);
-            bloomShader.setUniform("screenTex", OCCLUSION_MAP);
-            bloomShader.setUniform("stage", 0);
-            renderScreenQuad(bloomShader);
-            bindTexture(TEMPORARY_A);
-
-            // Reusing occlusion map since it's not used afterwards
-            bindFramebuffer(OCCLUSION_MAP);
-            glClear(GL_COLOR_BUFFER_BIT);
-            bloomShader.setUniform("screenTex", TEMPORARY_A);
-            bloomShader.setUniform("stage", 1);
-            renderScreenQuad(bloomShader);
-            bindTexture(OCCLUSION_MAP);
-
-
-            //Bind main texture
-            glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
-            glViewport(0, 0, curWidth, curHeight);
-
+            
             if (DebugActive(DEBUG_DRAW_LIGHTRAYS))
             {
-                glBindFramebuffer(GL_FRAMEBUFFER, 0);
-                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
                 // Screen shader
                 screenShader.setActive();
                 screenShader.setUniform("screenTex", OCCLUSION_MAP);
@@ -277,16 +265,34 @@ int main(int argc, char *argv[])
             }
             else
             {
+                // Bloom postprocessing (two pass)
+                bindFramebuffer(TEMPORARY_A);
+                glClear(GL_COLOR_BUFFER_BIT);
+                bloomShader.setActive();
+                bloomShader.setUniform("occlusionTex", OCCLUSION_MAP);
+                bloomShader.setUniform("screenTex", OCCLUSION_MAP);
+                bloomShader.setUniform("stage", 0);
+                renderScreenQuad(bloomShader);
+                bindTexture(TEMPORARY_A);
+
+                // Reusing occlusion map since it's not used afterwards
+                bindFramebuffer(OCCLUSION_MAP);
+                glClear(GL_COLOR_BUFFER_BIT);
+                bloomShader.setUniform("screenTex", TEMPORARY_A);
+                bloomShader.setUniform("stage", 1);
+                renderScreenQuad(bloomShader);
+                bindTexture(OCCLUSION_MAP);
+
+                //Bind main texture
+                glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
+                glViewport(0, 0, curWidth, curHeight);
+
                 bindFramebuffer(POSTPROCESS);
                 glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
                 glDepthMask(GL_FALSE); // TODO: Render last?
-                glActiveTexture(GL_TEXTURE0 + FRAMEBUFFER_COUNT); // TODO: non-fb tex enum
-                glBindTexture(GL_TEXTURE_CUBE_MAP, skyTexture);
                 skyboxShader.setActive();
-                skyboxShader.setUniform("skyboxTex", FRAMEBUFFER_COUNT);
-                skyboxShader.setUniform("projection", projection);
-                skyboxShader.setUniform("view", glm::mat4(glm::mat3(view)));
+                skyboxShader.setUniform("occlusionRendering", false);
                 render(skyboxShader, 0, MODEL_SKYBOX);
                 glDepthMask(GL_TRUE);
 
@@ -304,16 +310,15 @@ int main(int argc, char *argv[])
                 render(shader, RENDER_NORM | RENDER_COLOR, MODEL_DEFAULT);
 
                 bindTexture(POSTPROCESS);
+
                 glBindFramebuffer(GL_FRAMEBUFFER, 0);
                 glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-                // Sun render (postprocessing pass for bloom)
-                // TODO: Rename this to just "postShader" or something like that
-                postShader.setActive();
-                postShader.setUniform("screenTex", POSTPROCESS);
-                postShader.setUniform("bloomTex", OCCLUSION_MAP);
-                postShader.setUniform("sunColor", sunColor);
-                renderScreenQuad(postShader);
-            } 
+                    postShader.setActive();
+                    postShader.setUniform("screenTex", POSTPROCESS);
+                    postShader.setUniform("bloomTex", OCCLUSION_MAP);
+                    postShader.setUniform("sunColor", sunColor);
+                    renderScreenQuad(postShader);
+            }
             
             // Swap buffers and poll events
             glfwSwapBuffers(window);
@@ -337,6 +342,7 @@ int main(int argc, char *argv[])
     return 0;
 }
 
+// MARK: Render
 void render(Shader shader, unsigned int renderflags, unsigned int drawflags)
 {
     
@@ -438,6 +444,7 @@ void mouseCallback(GLFWwindow* window, double xPosD, double yPosD)
     camera->ProcessMouse(xChange, yChange);
 }
 
+// MARK: Init
 GLFWwindow* initializeAndCreateWindow(int screenWidth, int screenHeight, const char* windowName)
 {
     glfwInit();
@@ -556,24 +563,32 @@ unsigned int genBuffers(int bufferCount,
 
 unsigned int genTextures()
 {
-    Image skyTex = generateSkybox(1024);
-    
     glGenTextures(1, &skyTexture);
     glBindTexture(GL_TEXTURE_CUBE_MAP, skyTexture);
 
-    for (unsigned int i = 0; i < 6; i++)
+    Image horizonTex = generateMountain(1024);
+    for (unsigned int i : {GL_TEXTURE_CUBE_MAP_POSITIVE_X, GL_TEXTURE_CUBE_MAP_NEGATIVE_X,
+                            GL_TEXTURE_CUBE_MAP_POSITIVE_Z, GL_TEXTURE_CUBE_MAP_NEGATIVE_Z})
     {
-        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 
-                        0, GL_RGB, skyTex.width, skyTex.height, 0, GL_RGB, GL_UNSIGNED_BYTE, skyTex.data);
+        glTexImage2D(i, 0, GL_RGBA, horizonTex.width, horizonTex.height, 0, 
+            GL_RGBA, GL_UNSIGNED_BYTE, horizonTex.data);
     }
+    deleteImage(horizonTex);
 
+    Image skyTex = generateSkybox(1024);
+    for (unsigned int i : {GL_TEXTURE_CUBE_MAP_POSITIVE_Y, GL_TEXTURE_CUBE_MAP_NEGATIVE_Y})
+    {
+        glTexImage2D(i, 0, GL_RGBA, skyTex.width, skyTex.height, 0, 
+            GL_RGBA, GL_UNSIGNED_BYTE, skyTex.data);
+    }
+    deleteImage(skyTex);
+    
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
 
-    deleteImage(skyTex);
     return 1;
 }
 
@@ -614,6 +629,7 @@ void framebufferSizeCallback(GLFWwindow* window, int newWidth, int newHeight)
     (void) newHeight;
 }
 
+// MARK: C Args
 unsigned int handleArgs(int argc, char*argv[])
 {
     int c;

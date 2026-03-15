@@ -24,6 +24,9 @@ class Camera {
         vec3 up;
 };
 
+
+float clampBound(float val, vec2 bound) { return std::min(std::max(val, bound.x), bound.y); }
+
 // Camera class that just has a position and a direction it's looking
 class FixedCamera : public Camera
 {
@@ -81,6 +84,11 @@ class FreeCamera : public Camera
 
             yaw = _yaw;
             pitch = _pitch;
+
+            // Initalize bounds
+            xBound = vec2(-FLT_MAX, FLT_MAX);
+            yBound = vec2(-FLT_MAX, FLT_MAX);
+            zBound = vec2(-FLT_MAX, FLT_MAX);
         }
 
         virtual void ProcessInput(GLFWwindow* window, float deltaTime) {
@@ -101,6 +109,10 @@ class FreeCamera : public Camera
                 (movement2D.x * facing + movement2D.z * right);
             position.y += MOVE_SPEED * deltaTime * movementVert;
             
+            position.x = clampBound(position.x, xBound);
+            position.y = clampBound(position.y, yBound);
+            position.z = clampBound(position.z, zBound);
+
             RecalcVectors();
         }
 
@@ -128,4 +140,8 @@ class FreeCamera : public Camera
     
         float yaw;
         float pitch;
+
+        vec2 xBound;
+        vec2 yBound;
+        vec2 zBound;
 };
