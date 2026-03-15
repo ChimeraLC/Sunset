@@ -33,19 +33,20 @@ const float ASPECT_RATIO = (float) SCREEN_WIDTH / (float) SCREEN_HEIGHT;
 const float FRAMERATE = 40.0f;
 const float PER_FRAME = 1 / FRAMERATE;
 
-const int SHADOW_RESOLUTION = 512;
+const int SHADOW_RESOLUTION = 2048;
+const int SHADOW_RT_DOWNSCALE = 4;
 
 const float COLOR_WHITE[] = {1.0, 1.0, 1.0, 1.0};
 const float COLOR_BLACK[] = {0.0, 0.0, 0.0, 1.0};
 vec3 sunDirection = vec3(0, 1, 0);
 mat4 sunTransform = mat4(1.0);
-float sunShadowDist = 5;    // Distance shadowmap is rendered from
+float sunShadowDist = 4;    // Distance shadowmap is rendered from
 float sunRenderDist = 15;   // Distance sun model is rendered
 
 vec3 sunColor = vec3(0.9f, 0.30f, 0.35f);
 
 // Global values
-const int bufferCount = 4;
+const int bufferCount = MODEL_COUNT;
 unsigned int VAOs[bufferCount], FBOs[FRAMEBUFFER_COUNT], FTexs[FRAMEBUFFER_COUNT];
 unsigned int quadVAO;
 vector<int> triangleCounts;
@@ -54,13 +55,16 @@ vector<ModelData> modelDatas;
 unsigned int skyTexture;
 
 // TODO: Really need to cut down on shader count somehow, or, at least move into enum
-Shader shader, postShader, occlusionShader, depthShader, screenShader, radialShader, 
-    bloomShader, skyboxShader;
+Shader flatShader, postShader, occlusionShader, depthShader, screenShader, radialShader, 
+    bloomShader, skyboxShader, grassShader, depthFoliageShader;
 
 Camera* camera;
 float mouseX;
 float mouseY;
 bool mouseSet;
+float worldTime = 0;
+
+mat4 lightViewMatrix;
 
 int main(int argc, char *argv[])
 {
@@ -113,30 +117,18 @@ int main(int argc, char *argv[])
     sunTransform *= inverse(lookAt(lightDirection, sunDirection, vec3(0, 1, 0)));
 
     // Individual models
-    for (int i = 0; i < bufferCount; i++)
-    {
-        // TODO: Do I need to be worred about gc?
-        vector<float> vertices;
-        vector<int> indices;
-        int triangleCount;
-        ModelData modelData;
-
-        if (!createModel(i, vertices, indices, modelData, triangleCount))
-        {
-            cerr << "Error when generating model " << i << endl;
-            return -1;
-        }
-
-        triangleCounts.push_back(triangleCount);
-        modelDatas.push_back(modelData);
-        bindBuffer(i, VBOs, VAOs, EBOs, vertices, indices);
-    }
+    if (!genModels(VBOs, EBOs))
+        return -1;
 
     PrintLog("Creating camera");
     // Create camera
     if (DebugActive(DEBUG_FREEHAND_CAMERA))
     {
-        camera = new FreeCamera(vec3(-2, 0.2f, 0), 0, 0);
+        FreeCamera* freeCamera = new FreeCamera(vec3(-2, 0.2f, 0), 0, 0);
+        freeCamera->SetXBound(vec2(-2, 2));
+        freeCamera->SetZBound(vec2(-2, 2));
+        freeCamera->SetYBound(vec2(0.1, 2));
+        camera = freeCamera;
     }
     else
     {
@@ -144,10 +136,10 @@ int main(int argc, char *argv[])
     }
 
     // TODO: Calculate close and far planes based on model and sun
-    float nearPlane = 1.0f, farPlane = 10.0f;
+    float nearPlane = 1.f, farPlane = 10.0f;
 
     // Light view matrix (currently, this doesn't change)
-    mat4 lightProjection, lightView, lightViewMatrix;
+    mat4 lightProjection, lightView;
     lightProjection = ortho(-1.0f, 1.0f, -1.0f, 1.0f, nearPlane, farPlane);
     lightView = lookAt(sunDirection * sunShadowDist, vec3(0.0f), vec3(0.0, 1.0, 0.0));
     lightViewMatrix = lightProjection * lightView;
@@ -162,6 +154,9 @@ int main(int argc, char *argv[])
     float deltaTime = 0.0f;
     float prevFrame = static_cast<float>(glfwGetTime());
     bool shouldRender = true;
+
+    // Precalculate maps that don't change
+    precalc();
 
     PrintLog("Beginning Render Loop");
     // MARK: Render loop
@@ -188,6 +183,7 @@ int main(int argc, char *argv[])
             }
 
             shouldRender = true;
+            worldTime += deltaTime;
         }
 
         if (shouldRender)
@@ -197,25 +193,24 @@ int main(int argc, char *argv[])
             processInput(window);
             camera->ProcessInput(window, deltaTime);
 
-            // Depth buffer render
-            glViewport(0, 0, SHADOW_RESOLUTION, SHADOW_RESOLUTION);
-            bindFramebuffer(DEPTH_MAP);
+            // TODO: Low res foliage
+            glViewport(0, 0, SHADOW_RESOLUTION / SHADOW_RT_DOWNSCALE, 
+                SHADOW_RESOLUTION / SHADOW_RT_DOWNSCALE);
+            bindFramebuffer(DEPTH_MAP_RT);
             glClear(GL_DEPTH_BUFFER_BIT);
-            
-            depthShader.setActive();
-            depthShader.setUniform("lightView", lightViewMatrix);
-            
-            // TODO: Peter panning?
-            // No need to render sun for shadowmap
-            render(depthShader, 0, MODEL_DEFAULT);
 
-            glActiveTexture(GL_TEXTURE0);
-            bindTexture(DEPTH_MAP);
+            depthFoliageShader.setActive();
+            depthFoliageShader.setUniform("lightView", lightViewMatrix);
+            render(depthFoliageShader, INSTANCED | TIME_DEPENDENT | CULL_DISABLED, MODEL_FOLIAGE);
+        
+            bindTexture(DEPTH_MAP_RT);
 
             // Projection and view
             mat4 projection = perspective(radians(45.0f), ASPECT_RATIO, 0.1f, 100.0f );
             mat4 view = camera->GetLookAt();
-            vec4 sunScreenPrePos = projection * view * vec4(sunPosition, 1.0);
+            mat4 viewNoPosition = glm::mat4(glm::mat3(view));
+
+            vec4 sunScreenPrePos = projection * viewNoPosition * vec4(sunPosition, 1.0);
             vec3 sunScreenPos = vec3(sunScreenPrePos) / sunScreenPrePos.w;
             sunScreenPos = sunScreenPos * 0.5f + 0.5f;
 
@@ -230,7 +225,18 @@ int main(int argc, char *argv[])
             occlusionShader.setUniform("view", view);
             occlusionShader.setUniform("projection", projection);
 
-            render(occlusionShader, RENDER_LIGHTOCCLUSION, MODEL_DEFAULT | MODEL_LIGHTSOURCE);
+            render(occlusionShader, RENDER_LIGHTOCCLUSION, MODEL_DEFAULT);
+
+            occlusionShader.setUniform("view", viewNoPosition);
+            render(occlusionShader, RENDER_LIGHTOCCLUSION, MODEL_LIGHTSOURCE);
+
+            grassShader.setActive();
+            grassShader.setUniform("view", view);
+            grassShader.setUniform("projection", projection);
+            grassShader.setUniform("renderOcclusion", true);
+
+            render(grassShader, CULL_DISABLED | INSTANCED |
+                RENDER_LIGHTOCCLUSION | RENDER_COLOR, MODEL_FOLIAGE);
 
             // Rendering skybox
             glActiveTexture(GL_TEXTURE0 + FRAMEBUFFER_COUNT); // TODO: non-fb tex enum
@@ -238,7 +244,7 @@ int main(int argc, char *argv[])
             skyboxShader.setActive();
             skyboxShader.setUniform("skyboxTex", FRAMEBUFFER_COUNT);
             skyboxShader.setUniform("projection", projection);
-            skyboxShader.setUniform("view", glm::mat4(glm::mat3(view)));
+            skyboxShader.setUniform("view", viewNoPosition);
             skyboxShader.setUniform("occlusionRendering", true);
             render(skyboxShader, 0, MODEL_SKYBOX);
             bindTexture(OCCLUSION_MAP);
@@ -260,7 +266,7 @@ int main(int argc, char *argv[])
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
                 // Screen shader
                 screenShader.setActive();
-                screenShader.setUniform("screenTex", OCCLUSION_MAP);
+                screenShader.setUniform("screenTex", DEPTH_MAP_RT);
                 renderScreenQuad(screenShader);
             }
             else
@@ -297,17 +303,30 @@ int main(int argc, char *argv[])
                 glDepthMask(GL_TRUE);
 
                 //Main render
-                shader.setActive();
-                shader.setUniform("shadowMap", DEPTH_MAP);
-                shader.setUniform("lightraysTex", LIGHTRAYS_MAP);
-                shader.setUniform("lightView", lightViewMatrix);
-                shader.setUniform("lightDir", lightDirection);
+                flatShader.setActive();
+                flatShader.setUniform("shadowMap", DEPTH_MAP_PRE);
+                flatShader.setUniform("shadowMapRT", DEPTH_MAP_RT);
+                flatShader.setUniform("lightraysTex", LIGHTRAYS_MAP);
+                flatShader.setUniform("lightView", lightViewMatrix);
+                flatShader.setUniform("lightDir", lightDirection);
                 
                 // Projection / view
-                shader.setUniform("projection", projection);
-                shader.setUniform("view", view);
+                flatShader.setUniform("projection", projection);
+                flatShader.setUniform("view", view);
 
-                render(shader, RENDER_NORM | RENDER_COLOR, MODEL_DEFAULT);
+                render(flatShader, RENDER_NORM | RENDER_COLOR, MODEL_DEFAULT);
+
+                // Folliage
+                grassShader.setActive();
+                grassShader.setUniform("shadowMap", DEPTH_MAP_PRE);
+                grassShader.setUniform("shadowMapRT", DEPTH_MAP_RT);
+                grassShader.setUniform("lightraysTex", LIGHTRAYS_MAP);
+                grassShader.setUniform("lightView", lightViewMatrix);
+                grassShader.setUniform("lightDir", lightDirection);
+                grassShader.setUniform("renderOcclusion", false);
+            
+                render(grassShader, TIME_DEPENDENT | CULL_DISABLED | INSTANCED |
+                    RENDER_COLOR | RENDER_NORM, MODEL_FOLIAGE);
 
                 bindTexture(POSTPROCESS);
 
@@ -336,7 +355,7 @@ int main(int argc, char *argv[])
     glDeleteTextures(FRAMEBUFFER_COUNT, FTexs);
 
     // Calling this deletes all shaders
-    shader.deleteProgram();
+    flatShader.deleteProgram();
 
     glfwTerminate();
     return 0;
@@ -361,7 +380,8 @@ void render(Shader shader, unsigned int renderflags, unsigned int drawflags)
         {   // Transform lightsource to be at sun position
             model = sunTransform;
         }
-        else if (modelData.modelType & MODEL_DEFAULT)
+        else if (modelData.modelType & MODEL_DEFAULT
+        || modelData.modelType & MODEL_FOLIAGE)
         {   // Use modeldata transform
             model = translate(model, modelData.translation);
             vec3 rotationAxis = vec3(modelData.rotation);
@@ -384,6 +404,9 @@ void render(Shader shader, unsigned int renderflags, unsigned int drawflags)
             shader.setUniform("lightColor", vec3(1.0f, 0.75f, 0.75f));
         }
 
+        if (renderflags & CULL_DISABLED)
+            glDisable(GL_CULL_FACE);
+
         // Set isLight uniform during light occlusion
         if (renderflags & RENDER_LIGHTOCCLUSION)
         {
@@ -393,9 +416,27 @@ void render(Shader shader, unsigned int renderflags, unsigned int drawflags)
                 shader.setUniform("isLight", false);
         }
 
+        // Time value
+        if (renderflags & TIME_DEPENDENT)
+        {
+            shader.setUniform("time", worldTime);
+        }
+
         // Get triangle count based on model
-        glDrawElements(GL_TRIANGLES, 3 * triangleCounts[i], 
-                GL_UNSIGNED_INT, 0);
+        if (renderflags & INSTANCED)
+        {
+            glDrawElementsInstanced(GL_TRIANGLES, 3 * triangleCounts[i], 
+                    GL_UNSIGNED_INT, 0, modelData.instanceCount);
+        }
+        else
+        {
+            glDrawElements(GL_TRIANGLES, 3 * triangleCounts[i], 
+                    GL_UNSIGNED_INT, 0);
+        }
+
+        if (renderflags & CULL_DISABLED)
+            glEnable(GL_CULL_FACE);
+
     }
 }
 
@@ -478,17 +519,20 @@ GLFWwindow* initializeAndCreateWindow(int screenWidth, int screenHeight, const c
 // TODO: Clean this up TT
 bool compileShaders()
 {
-    shader = Shader("shaders/base/flatShader.vs", 
+    flatShader = Shader("shaders/base/flatShader.vs", 
         DebugActive(DEBUG_DRAW_NORMS) ? "shaders/base/normShader.fs" : "shaders/base/flatShader.fs", "base shader");
     postShader = Shader("shaders/postprocess/screenShader.vs", "shaders/postprocess/postShader.fs", "postprocess shader");
     occlusionShader = Shader("shaders/occlusion/occlusionShader.vs", "shaders/occlusion/occlusionShader.fs", "occlusion shader");
     depthShader = Shader("shaders/depth/depthShader.vs", "shaders/depth/depthShader.fs", "depth shader");
+    depthFoliageShader = Shader("shaders/depth/depthFoliageShader.vs", "shaders/depth/depthShader.fs", "depth foliage shader");
     screenShader = Shader("shaders/postprocess/screenShader.vs", "shaders/postprocess/screenShader.fs", "screen shader");
     radialShader = Shader("shaders/postprocess/screenShader.vs", "shaders/postprocess/radialBlurShader.fs", "radial blur shader");
     bloomShader = Shader("shaders/postprocess/screenShader.vs", "shaders/postprocess/bloomShader.fs", "bloom shader");
     skyboxShader = Shader("shaders/horizon/skyboxShader.vs", "shaders/horizon/skyboxShader.fs", "skybox shader");
+    grassShader = Shader("shaders/foliage/grassShader.vs", "shaders/foliage/grassShader.fs", "grass shader");
+    
 
-    return shader.shadersValid;
+    return flatShader.shadersValid;
 }
 
 unsigned int genBuffers(int bufferCount, 
@@ -512,9 +556,9 @@ unsigned int genBuffers(int bufferCount,
     glGenFramebuffers(FRAMEBUFFER_COUNT, FBOs);
     glGenTextures(FRAMEBUFFER_COUNT, FTexs);
 
-    // Depthmap
+    // Precalculated depth map (trees)
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, FBOs[DEPTH_MAP]);
+    glBindTexture(GL_TEXTURE_2D, FBOs[DEPTH_MAP_PRE]);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, 
                 SHADOW_RESOLUTION, SHADOW_RESOLUTION, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -525,11 +569,27 @@ unsigned int genBuffers(int bufferCount,
     glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, COLOR_WHITE); 
 
     // Binding texture to buffer
-    glBindFramebuffer(GL_FRAMEBUFFER, FBOs[DEPTH_MAP]);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, FTexs[DEPTH_MAP], 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, FBOs[DEPTH_MAP_PRE]);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, FTexs[DEPTH_MAP_PRE], 0);
+
+    // Realtime depth map (foliage)
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, FBOs[DEPTH_MAP_RT]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, 
+                SHADOW_RESOLUTION / SHADOW_RT_DOWNSCALE, SHADOW_RESOLUTION / SHADOW_RT_DOWNSCALE, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER); 
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER); 
+    // Assume out of range is out of shadow
+    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, COLOR_WHITE); 
+
+    // Binding texture to buffer
+    glBindFramebuffer(GL_FRAMEBUFFER, FBOs[DEPTH_MAP_RT]);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, FTexs[DEPTH_MAP_RT], 0);
 
     // Other textures (that use color)
-    for (int i = 1; i < FRAMEBUFFER_COUNT; i++)
+    for (int i = 2; i < FRAMEBUFFER_COUNT; i++)
     {
         //glActiveTexture(GL_TEXTURE0 + i);
         glBindTexture(GL_TEXTURE_2D, FTexs[i]);
@@ -593,7 +653,8 @@ unsigned int genTextures()
 }
 
 unsigned int bindBuffer(int bufferIndex, unsigned int (&VBOs)[], unsigned int (&VAOs)[], 
-        unsigned int (&EBOs)[], vector<float> vertices, vector<int> indices)
+        unsigned int (&EBOs)[], vector<float> vertices, vector<int> indices,
+        bool hasInstanceData = false, vector<float> instanceData = {})
 {
     glBindVertexArray(VAOs[bufferIndex]);
     glBindBuffer(GL_ARRAY_BUFFER, VBOs[bufferIndex]);
@@ -606,14 +667,85 @@ unsigned int bindBuffer(int bufferIndex, unsigned int (&VBOs)[], unsigned int (&
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
-    // Texture / UV data
+    // Norm data
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
+
+    // Instance data
+    if (hasInstanceData)
+    {
+        unsigned int instanceVBO;
+        glGenBuffers(1, &instanceVBO);
+        glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
+        glBufferData(GL_ARRAY_BUFFER, instanceData.size() * sizeof(float), &instanceData[0], GL_STATIC_DRAW);
+        glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+        glEnableVertexAttribArray(2);
+        glVertexAttribDivisor(2, 1);  
+    }
+
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
 
     return 1;
+}
+
+// TODO: Take in extra input
+unsigned int genModels(unsigned int (&VBOs)[], unsigned int (&EBOs)[])
+{
+    for (int i = 0; i < bufferCount; i++)
+    {
+        // TODO: Do I need to be worred about gc?
+        vector<float> vertices;
+        vector<int> indices;
+        int triangleCount;
+        ModelData modelData;
+
+        if (!createModel(i, vertices, indices, modelData, triangleCount))
+        {
+            cerr << "Error when generating model " << i << endl;
+            return 0;
+        }
+
+        triangleCounts.push_back(triangleCount);
+        modelDatas.push_back(modelData);
+
+        vector<float> instanceData;
+        switch(i)
+        {
+            case MODELTYPE_GRASS:
+                for (unsigned int j = 0; j < modelData.instanceCount; j++)
+                {
+                    instanceData.push_back(-0.5 + (float)(j / 10) / 10.0f);
+                    instanceData.push_back(-0.5 + (float)(j % 10) / 10.0f);
+                    instanceData.push_back(17 * j);
+                }
+                bindBuffer(i, VBOs, VAOs, EBOs, vertices, indices, true, instanceData);
+            break;
+            default:
+                bindBuffer(i, VBOs, VAOs, EBOs, vertices, indices);
+            break;
+        }
+    }
+
+
+    return 1;
+}
+
+void precalc()
+{
+    glViewport(0, 0, SHADOW_RESOLUTION, SHADOW_RESOLUTION);
+    bindFramebuffer(DEPTH_MAP_PRE);
+    glClear(GL_DEPTH_BUFFER_BIT);
+    
+    depthShader.setActive();
+    depthShader.setUniform("lightView", lightViewMatrix);
+    
+    // TODO: Peter panning?
+    // No need to render sun for shadowmap
+    render(depthShader, 0, MODEL_DEFAULT);
+
+    bindTexture(DEPTH_MAP_PRE);
 }
 
 void framebufferSizeCallback(GLFWwindow* window, int newWidth, int newHeight)

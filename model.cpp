@@ -18,17 +18,20 @@ unsigned int createModel(int index, vector<float>& vertices, vector<int>& indice
     ModelData& modelData, int& triangleCount) {
     switch (index)
     {
-        case 0:
+        case MODELTYPE_SUN:
             createModelSun(vertices, indices, modelData, triangleCount);
             break;
-        case 1:
+        case MODELTYPE_SKYBOX:
             createModelSkybox(vertices, indices, modelData, triangleCount);
             break;
-        case 2:
+        case MODELTYPE_GROUND:
             createModelGround(vertices, indices, modelData, triangleCount);
             break;
-        case 3:
-            createModelTrunk(vertices, indices, modelData, triangleCount, vec3(0.0, 0, 0));
+        case MODELTYPE_TRUNK:
+            createModelTrunk(vertices, indices, modelData, triangleCount);
+            break;
+        case MODELTYPE_GRASS:
+            createModelGrass(vertices, indices, modelData, triangleCount);
             break;
         default:
             return 0;
@@ -211,6 +214,27 @@ void createModelSkybox(vector<float>& vertices, vector<int>& indices,
     fillVertexNormals(preVertices, preIndices, vertices, indices, triangleCount);
 }
 
+void createModelGrass(vector<float>& vertices, vector<int>& indices, 
+    ModelData& modelData, int& triangleCount) {
+        
+    modelData.modelType |= MODEL_FOLIAGE;
+    modelData.translation = vec3(0, 0, 0.3);
+
+    vector<float> preVertices = {
+        0.03, 0, 0,
+        -0.03, 0, 0,
+        0, 0.22, 0,
+    };
+
+    vector<int> preIndices = {
+            0, 1, 2
+    };
+
+    fillVertexNormals(preVertices, preIndices, vertices, indices, triangleCount);
+
+    modelData.color = vec3(0.0f, 0.5f, 0.0f);
+    modelData.instanceCount = 100;
+}
 // MARK: TREE
 
 // Creates a tree ring of points; returns start point of the ring
@@ -220,9 +244,6 @@ int createTreeRing(vec3 ringCenter, vec3 inDirection, float radius, int sides, v
     // First index is always aligned along vec3(1, 0, 0)
     vec3 right = normalize(cross(inDirection, VECTOR_ALIGN));
     vec3 forward = -normalize(cross(inDirection, right));
-
-    cout << right.x << " " << right.y << " " << right.z << endl;
-    cout << forward.x << " " << forward.y << " " << forward.z << endl;
 
     int startIndex = vertices.size() / 3;
 
@@ -381,11 +402,11 @@ void splitTreeRing(int index, vec3 splitDirection, int& outIndexA, int& outIndex
 }
 
 void createModelTrunk(vector<float>& vertices, vector<int>& indices, 
-    ModelData& modelData, int& triangleCount, vec3 offset = vec3(0)) {
+    ModelData& modelData, int& triangleCount) {
 
     modelData.modelType |= MODEL_DEFAULT;
     modelData.color = vec3(0.6f, 0.3f, 0.0f);
-    modelData.translation = offset;
+    modelData.translation = vec3(0.0f);;
     
     int sides = 12;
 
@@ -406,8 +427,6 @@ void createModelTrunk(vector<float>& vertices, vector<int>& indices,
 
     capBranch(vec3(0.6f, 0.9f, 0.0f), indexB, sides, preVertices, preIndices);
     capBranch(vec3(-0.1f, 0.9f, 0.0f), indexD, sides, preVertices, preIndices);
-
-    displayValues(preVertices, preIndices);
 
     fillVertexNormals(preVertices, preIndices, vertices, indices, triangleCount);
 }

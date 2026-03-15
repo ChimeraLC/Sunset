@@ -6,6 +6,16 @@ enum ModelType {
 	MODEL_DEFAULT = 0x01,
 	MODEL_LIGHTSOURCE = 0x02,
 	MODEL_SKYBOX = 0x04,
+	MODEL_FOLIAGE = 0x08,
+};
+
+enum Models {
+	MODELTYPE_SUN,
+	MODELTYPE_SKYBOX,
+	MODELTYPE_GROUND,
+	MODELTYPE_TRUNK,
+	MODELTYPE_GRASS,
+	MODEL_COUNT
 };
 
 struct ModelData {
@@ -13,6 +23,7 @@ struct ModelData {
 	glm::vec3 translation = glm::vec3(0);
 	glm::vec4 rotation = glm::vec4(0); // Rotation angle stored in w
 	unsigned int modelType = 0;
+	unsigned int instanceCount = 0;
 };
 
 // Creates the vertices and indices for a model
@@ -32,6 +43,9 @@ void createModelSkybox(std::vector<float>& vertices, std::vector<int>& indices,
 void createModelSun(std::vector<float>& vertices, std::vector<int>& indices, 
 	ModelData& modelData, int& triangleCount);
 void createModelTrunk(std::vector<float>& vertices, std::vector<int>& indices, 
-	ModelData& modelData, int& triangleCount, glm::vec3 offset);
+	ModelData& modelData, int& triangleCount);
+void createModelGrass(std::vector<float>& vertices, std::vector<int>& indices, 
+	ModelData& modelData, int& triangleCount);
+
 
 glm::vec3 getNormal(const float* point1, const float* point2, const float* point3);

@@ -123,6 +123,10 @@ class FreeCamera : public Camera
             pitch = glm::max(glm::min(pitch, PI / 2), -PI / 2);
         }
 
+        void SetXBound(vec2 bound) {xBound = bound;}
+        void SetYBound(vec2 bound) {yBound = bound;}
+        void SetZBound(vec2 bound) {zBound = bound;}
+
     protected:
         void RecalcVectors() {
             facing = normalize(vec3(

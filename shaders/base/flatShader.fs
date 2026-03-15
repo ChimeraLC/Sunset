@@ -7,6 +7,7 @@ in vec3 fragPos;
 in vec3 fragLightPos;
 
 uniform sampler2D shadowMap;
+uniform sampler2D shadowMapRT;
 uniform sampler2D lightraysTex;
 
 uniform vec3 baseColor;
@@ -19,18 +20,22 @@ float shadowCalc(vec3 inFragLightPos, vec3 norm)
 {
     vec3 depthCoords = inFragLightPos * 0.5 + 0.5;
     float currentDepth = depthCoords.z;
-    float shadowSmooth = 0.005f;
 
-    if (currentDepth > 1.0)
+    float diff = dot(norm, -lightDir);
+    float shadowSmooth = mix(0.005, 0.01, diff);
+
+    if (currentDepth >= 0.9)
         return 0.0;
 
     // Bilinear shadow sampling    
     vec2 texelSize = 1.0f / textureSize(shadowMap, 0);
+    vec2 texelSizeB = 1.0f / textureSize(shadowMapRT, 0);
     vec2 scaledCoords = depthCoords.xy * textureSize(shadowMap, 0);
     float xRatio = scaledCoords.x - floor(scaledCoords.x) - 0.5;
     float yRatio = scaledCoords.y - floor(scaledCoords.y) - 0.5;
 
     float inShadow = 0;
+    float inShadowRT = 0;
 
     for (int i = 0; i < 4; i++)
     {        
@@ -45,26 +50,33 @@ float shadowCalc(vec3 inFragLightPos, vec3 norm)
         inShadow += (currentDepth - shadowSmooth > closestDepth  ? 1.0 : 0.0)
             * (xSlice > 0 ? abs(xRatio) : 1 - abs(xRatio))
             * (ySlice > 0 ? abs(yRatio) : 1 - abs(yRatio));    
+        
+        testPos = depthCoords.xy + 
+            vec2(xSlice * sign(xRatio), ySlice * sign(yRatio)) * texelSizeB;
+        closestDepth = texture(shadowMapRT, testPos).r - norm.y * 0.05f;
+        inShadowRT+= (currentDepth - shadowSmooth > closestDepth  ? 1.0 : 0.0)
+            * (xSlice > 0 ? abs(xRatio) : 1 - abs(xRatio))
+            * (ySlice > 0 ? abs(yRatio) : 1 - abs(yRatio));
     }
-    return inShadow;
+    return max(inShadow, inShadowRT / 2);
 }
 
 void main()
 {
     vec2 screenPos = gl_FragCoord.xy / vec2(1920, 1080);
 
+    // Diffuse lighting TODO: Assert always pre-normalized if not scaling? reduce computation
+    vec3 norm = normalize(normal);
+    vec3 lightTowards = normalize(-lightDir);
+    
     // God rays
     float intensity = texture(lightraysTex, screenPos).r;
 
-    // Ambient lighting
-    float ambientCoef = 0.25 * (0.5 + 8 * intensity);
+    // Ambient lighting (+ artificial backlighting)
+    float ambientCoef = 0.25 * (0.25 + 4 * intensity + (1 + dot(norm, lightTowards)) / 2);
     
-    // Diffuse lighting TODO: Assert always pre-normalized if not scaling? reduce computation
-    vec3 norm = normalize(normal);
-    //vec3 lightDir = normalize(lightPos - fragPos);
+    float diff = max(dot(norm, lightTowards), 0);
     
-    vec3 lightTowards = normalize(-lightDir);
-    float diff = max(dot(norm, lightTowards), 0.0);
     float diffuseCoef = diff;
 
     // Specular lighting

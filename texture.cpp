@@ -63,17 +63,16 @@ Image generateMountain(int width)
     // Horizontal position, vertical position pairs 
     int peakCount = 4;
     vector<float> peaks = {
+        -0.8, 0.53,
         0.1, 0.55,
         0.3, 0.51,
         0.6, 0.55,
         0.8, 0.53,
+        1.1, 0.55
     };
 
     // Putting 'bumpers' on front and back
-    peaks.push_back(peaks[0] + 1);
-    peaks.push_back(peaks[1]);
-    peaks.insert(peaks.begin(), peaks[-3]);
-    peaks.insert(peaks.begin(), peaks[-4] - 1);
+    // TODO: THIS DIDN"T WORK
 
     for (int col = 0; col < width; col++)
     {

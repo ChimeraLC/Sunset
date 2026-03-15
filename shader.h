@@ -22,6 +22,7 @@ class Shader
         void setUniform(const string name, bool value) const;
         void setUniform(const string name, int value) const;
         void setUniform(const string name, float value) const;
+        void setUniform(const string name, vec2 value) const;
         void setUniform(const string name, vec3 value) const;
         void setUniform(const string name, vec4 value) const;
         void setUniform(const string name, mat3 value) const;
