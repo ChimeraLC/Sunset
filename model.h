@@ -1,5 +1,7 @@
 #include <glm/glm.hpp>
 
+#include "texture.h"
+
 #include <vector>
 
 enum ModelType {
@@ -29,7 +31,8 @@ struct ModelData {
 
 // Creates the vertices and indices for a model
 unsigned int createModel(int index, std::vector<float>& vertices, std::vector<int>& indices,
-	ModelData& modelData, int& triangleCount, std::vector<glm::mat4>& instanceData);
+	ModelData& modelData, int& triangleCount, std::vector<glm::mat4>& instanceData,
+	Image designTextures[], int designTextureCount);
 
 // Based on triangle vertices + indices setup without normals and with repeats, creates full vectors
 void fillVertexNormals(std::vector<float> const& preVertices, 
@@ -44,9 +47,10 @@ void createModelSkybox(std::vector<float>& vertices, std::vector<int>& indices,
 void createModelSun(std::vector<float>& vertices, std::vector<int>& indices, 
 	ModelData& modelData, int& triangleCount);
 void createModelTrunk(std::vector<float>& vertices, std::vector<int>& indices, 
-	ModelData& modelData, int& triangleCount);
+	ModelData& modelData, int& triangleCount, Image designTexture);
 void createModelGrass(std::vector<float>& vertices, std::vector<int>& indices, 
-	ModelData& modelData, int& triangleCount, std::vector<glm::mat4>& instanceData);
+	ModelData& modelData, int& triangleCount, std::vector<glm::mat4>& instanceData,
+	Image designTexture);
 void createModelLeaves(std::vector<float>& vertices, std::vector<int>& indices, 
 	ModelData& modelData, int& triangleCount, std::vector<glm::mat4>& instanceData);
 

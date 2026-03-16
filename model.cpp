@@ -7,6 +7,7 @@
 #include <iostream>
 
 #include "consts.h"
+#include "texture.h"
 
 #include "model.h"
 
@@ -14,7 +15,8 @@ using namespace glm;
 using namespace std;
 
 unsigned int createModel(int index, vector<float>& vertices, vector<int>& indices, 
-    ModelData& modelData, int& triangleCount, std::vector<glm::mat4>& instanceData) {
+    ModelData& modelData, int& triangleCount, std::vector<glm::mat4>& instanceData,
+    Image designTextures[], int designTextureCount) {
     switch (index)
     {
         case MODELTYPE_SUN:
@@ -27,10 +29,12 @@ unsigned int createModel(int index, vector<float>& vertices, vector<int>& indice
             createModelGround(vertices, indices, modelData, triangleCount);
             break;
         case MODELTYPE_TRUNK:
-            createModelTrunk(vertices, indices, modelData, triangleCount);
+            createModelTrunk(vertices, indices, modelData, triangleCount,
+                designTextureCount >= 1 ? designTextures[0] : Image());
             break;
         case MODELTYPE_GRASS:
-            createModelGrass(vertices, indices, modelData, triangleCount, instanceData);
+            createModelGrass(vertices, indices, modelData, triangleCount, instanceData,
+                designTextureCount >= 2 ? designTextures[1] : Image());
             break;
         case MODELTYPE_LEAVES:
             createModelLeaves(vertices, indices, modelData, triangleCount, instanceData);
@@ -222,15 +226,16 @@ void createModelSkybox(vector<float>& vertices, vector<int>& indices,
 }
 
 void createModelGrass(vector<float>& vertices, vector<int>& indices, 
-    ModelData& modelData, int& triangleCount, std::vector<glm::mat4>& instanceData) {
+    ModelData& modelData, int& triangleCount, std::vector<glm::mat4>& instanceData,
+    Image designTexture) {
         
     modelData.modelType |= MODEL_FOLIAGE;
     modelData.translation = vec3(0, 0, 0.0);
 
     vector<float> preVertices = {
-        0.03, 0, 0,
-        -0.03, 0, 0,
-        0, 0.22, 0,
+        0.025, 0, 0,
+        -0.025, 0, 0,
+        0, 0.16, 0,
     };
 
     vector<int> preIndices = {
@@ -240,18 +245,62 @@ void createModelGrass(vector<float>& vertices, vector<int>& indices,
     fillVertexNormals(preVertices, preIndices, vertices, indices, triangleCount);
 
     modelData.color = vec3(0.0f, 0.5f, 0.0f);
-    int count = 10;
-    modelData.instanceCount = count * count;
 
-    
-    for (unsigned int j = 0; j < modelData.instanceCount; j++)
+    // TODO: Why does this crash sometimes?
+    if (designTexture.data != nullptr)
     {
-        mat4 model = mat4(1.0f);
-        model = translate(model, glm::vec3(- count / 20 + (float)(j / count) / 10.0f, 
-            0, - count / 20 + (float)(j % count) / 10.0f));
-        model = scale(model, glm::vec3(1.0f, 1.0f, 1.0f));
-        model = rotate(model, 17.0f * j, WORLD_UP);
-        instanceData.push_back(model);
+        int count = 0;
+        
+        int extent = 1;
+        int frequency = 30;
+
+        // If a spot is colored in, add grass there
+        for (int row = -frequency; row <= frequency; row++)
+        {
+            for (int col = -frequency; col <= frequency; col++)
+            {
+                // No grass near tree base
+                if (abs(col) + abs(row) <= 2)
+                    continue;
+
+                vec2 testPos = vec2(row + frequency, col + frequency) / (2.f * (frequency + 1))
+                    * vec2(designTexture.height, designTexture.width);
+                
+                if (getColor(designTexture, testPos.x, testPos.y).x < 0.5
+                    || getColor(designTexture, designTexture.height - testPos.x, 
+                        designTexture.width - testPos.y).x < 0.5)
+                {
+                    mat4 model = mat4(1.0f);
+                    model = translate(model, glm::vec3((float) col / frequency * extent, 
+                        0, (float) row / frequency * extent));
+                    model = scale(model, glm::vec3(1.0f, 1.0f, 1.0f));
+                    model = rotate(model, 17.0f * (row + col), WORLD_UP);
+                    instanceData.push_back(model);
+
+                    count++;
+                }
+            }
+        }
+        // Day night dependent on second texture
+        if (count > frequency * frequency * 0.7f)
+            setTime(NIGHT);
+
+        modelData.instanceCount = count;
+
+    }
+    else // Backup scene
+    {
+        int count = 10;
+        modelData.instanceCount = count * count;
+        for (unsigned int j = 0; j < modelData.instanceCount; j++)
+        {
+            mat4 model = mat4(1.0f);
+            model = translate(model, glm::vec3(- (float) count / 20 + (float)(j / count) / count, 
+                0, -  (float) count / 20 + (float)(j % count) / count));
+            model = scale(model, glm::vec3(1.0f, 1.0f, 1.0f));
+            model = rotate(model, 17.0f * j, WORLD_UP);
+            instanceData.push_back(model);
+        }
     }
 }
 
@@ -522,8 +571,8 @@ void splitPoints(vector<vec2> inPoints, vector<vec2>& outPointsA, vector<vec2>& 
 
     // Split left and right of center, close to center are random
     float range = farRight - farLeft;
-    float tossupLeft = farLeft + range * 0.45;
-    float tossupRight = farLeft + range * 0.55;
+    float tossupLeft = farLeft + range * 0.5;
+    float tossupRight = farLeft + range * 0.5;
 
     for (vec2 point : inPoints)
     {
@@ -554,8 +603,8 @@ vec3 treeNewDirection(vec3 inDirection, vec3 startPoint, vec2 endPoint)
     vec3 newPoint = vec3(endPoint.x, endPoint.y, startPoint.z);
     float branchLength = length(newPoint - startPoint);
 
-    newPoint.z += (inDirection.z + randFloat() / 4 - 0.125f) * branchLength;
-
+    float bump = randFloat() - 0.5f;
+    newPoint.z += (inDirection.z / 2 + bump) * branchLength;
     return newPoint;
 }
 
@@ -574,13 +623,16 @@ void createModelSubtree(vec3 startPoint, vec3 inDirection, int startIndex, vecto
     {
         vec2 inPoint = inPoints[inPoints.size() - 1];
 
-        radius *= 0.7f + randFloat() * 0.1f;
-
         vec3 newPoint = treeNewDirection(inDirection, startPoint, inPoint);
 
         vec3 newInDirection = inDirection + normalize(newPoint - startPoint);
         newInDirection = normalize(newInDirection);
-        createTreeRing(startPoint, newInDirection, radius, sides, preVertices, startIndex);
+
+        float branchLength = length(newPoint - startPoint);
+        radius *= pow(0.6f + randFloat() * 0.1f, branchLength);
+
+        if (startIndex != 0)
+            createTreeRing(startPoint, newInDirection, radius, sides, preVertices, startIndex);
 
         int index = createTreeRing(newPoint, newPoint - startPoint,
         radius, sides, preVertices);
@@ -606,6 +658,16 @@ void createModelSubtree(vec3 startPoint, vec3 inDirection, int startIndex, vecto
             vec2 leftPoint = leftPoints[leftPoints.size() - 1];
             vec3 newPointRight = treeNewDirection(inDirection, startPoint, rightPoint);
             vec3 newPointLeft = treeNewDirection(inDirection, startPoint, leftPoint);
+
+            // Checking that they're not too overlapping
+            vec3 leftDirection = normalize(newPointLeft - startPoint);
+            vec3 rightDirection = normalize(newPointRight - startPoint);
+            if (dot(leftDirection, rightDirection) > 0.95f)
+            {
+                createModelSubtree(startPoint, inDirection, startIndex, inPoints, radius, preVertices, preIndices, true);
+            }
+            else
+            {
             vec3 splitDirection = newPointLeft - newPointRight; // TODO: Calculate this better once z != 0
             
             if (normalize(newPointRight - startPoint).x > normalize(newPointLeft - startPoint).x)
@@ -622,8 +684,10 @@ void createModelSubtree(vec3 startPoint, vec3 inDirection, int startIndex, vecto
 
             // Create new branches
             radius *= 0.6f; // Radius reduced significantly on branching
-            float radiusLeft = radius * (0.7f + randFloat() * 0.15f);
-            float radiusRight = radius * (0.7f + randFloat() * 0.15f);
+            float branchLengthLeft = length(newPointLeft - startPoint);
+            float branchLengthRight = length(newPointRight - startPoint);
+            float radiusLeft = radius * pow(0.6f + randFloat() * 0.15f, branchLengthLeft);
+            float radiusRight = radius * pow(0.6f + randFloat() * 0.15f, branchLengthRight);
 
             int indexL = createTreeRing(newPointLeft, newPointLeft-startPoint, 
                     radiusLeft, sides, preVertices);
@@ -636,12 +700,33 @@ void createModelSubtree(vec3 startPoint, vec3 inDirection, int startIndex, vecto
             rightPoints.pop_back();
             createModelSubtree(newPointLeft, newPointLeft-startPoint, indexL, leftPoints, radiusLeft, preVertices, preIndices);
             createModelSubtree(newPointRight, newPointRight-startPoint, indexR, rightPoints, radiusRight, preVertices, preIndices);
+            }
         }
     }
 }
 
+// Starting at a position on the image, finds first image edge
+vec2 sampleRow(Image image, vec2 startPos, bool goingRight, bool& found, float sampleRate = 0.05f)
+{
+    int col = getColor(image, startPos.y * image.height, startPos.x * image.width).r;
+    for (int i = 1; i < 1 / sampleRate; i++)
+    {
+        startPos.x += (goingRight ? 1 : -1) * sampleRate;
+        if (startPos.x > 1) startPos.x -= 1;
+        if (startPos.x < 0) startPos.x += 1;
+
+        if (getColor(image, startPos.y * image.height, startPos.x * image.width).r != col)
+        {
+            found = true;
+            return startPos;
+        }
+    }
+    found = false;
+    return vec2(0);
+}
+
 void createModelTrunk(vector<float>& vertices, vector<int>& indices, 
-    ModelData& modelData, int& triangleCount) {
+    ModelData& modelData, int& triangleCount, Image designTexture) {
 
     modelData.modelType |= MODEL_DEFAULT;
     modelData.color = vec3(0.6f, 0.3f, 0.0f);
@@ -654,9 +739,39 @@ void createModelTrunk(vector<float>& vertices, vector<int>& indices,
     vector<float> preVertices;
     vector<int> preIndices;
 
-    // Input vector of points generated based on input texture (latter is TODO)
+    // Input vector of points generated based on input texture
     // Ordered from highest to lowest. z will be random~ish
-    vector<vec2> inputPoints = { vec2(0.2, 0.7), vec2(-0.1, 0.7), vec2(0.25, 0.65), vec2(-0.3, 0.65), vec2(-0.2, 0.6), vec2(0.2, 0.6), vec2(0, 0.3)};
+    vector<vec2> inputPoints;
+    bool everFoundPoint = false;
+    float stepSize = 0.025f;
+    if (designTexture.data != nullptr)
+    {
+        for (float i = 0.9f; i >= 0.025f; i -= stepSize)
+        {
+            bool found = false;
+            vec2 foundPoint = sampleRow(designTexture, vec2(randFloat(), i), 
+                randFloat() > 0.5f ? true : false,
+                found);
+
+            if (found)
+            {
+                everFoundPoint = true;
+                vec2 newPoint = foundPoint - vec2(0.5f, 0);
+                newPoint.x = sign(newPoint.x) * glm::min(i * 1.f, abs(newPoint.x));
+                inputPoints.push_back(newPoint);
+            }
+            if (everFoundPoint)
+            {
+                stepSize += 0.005f;
+            }
+        }
+    }
+    if (inputPoints.size() == 0)
+    {
+        inputPoints = { vec2(0.2, 0.7), vec2(-0.1, 0.7), vec2(0.25, 0.65), vec2(-0.3, 0.65), vec2(-0.2, 0.6), vec2(0.2, 0.6), vec2(0, 0.3)};
+    }
+    
+    
     maxHeight = inputPoints[0].y;
 
     // Sanity check

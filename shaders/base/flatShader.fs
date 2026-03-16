@@ -58,7 +58,7 @@ float shadowCalc(vec3 inFragLightPos, vec3 norm)
             * (xSlice > 0 ? abs(xRatio) : 1 - abs(xRatio))
             * (ySlice > 0 ? abs(yRatio) : 1 - abs(yRatio));
     }
-    return max(inShadow, inShadowRT / 3);
+    return max(inShadow, inShadowRT / 2);
 }
 
 void main()

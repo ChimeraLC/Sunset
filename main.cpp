@@ -18,6 +18,7 @@
 #include "camera.h"
 #include "debug.h"
 #include "texture.h"
+#include "consts.h"
 
 #include "main.h"
 
@@ -25,8 +26,6 @@ using namespace std;
 using namespace glm;
 
 // Config settings
-const int SCREEN_WIDTH = 1920;
-const int SCREEN_HEIGHT = 1080;
 int curWidth = SCREEN_WIDTH;
 int curHeight = SCREEN_HEIGHT;
 const float ASPECT_RATIO = (float) SCREEN_WIDTH / (float) SCREEN_HEIGHT;
@@ -53,15 +52,26 @@ vector<int> triangleCounts;
 vector<ModelData> modelDatas;
 
 unsigned int skyTexture;
+Image currentImage;
+const int designImageCount = 2;
+// First texture decides clouds/stars and tree. second texture decides grass and day/night
+Image designImages[designImageCount];
+bool inDesignStage = true;
+int currentDesignStage = 0;
+const unsigned int DESIGN_EXIT_KEY = GLFW_KEY_R;
+bool exitKeyHeld = false;
 
 // TODO: Really need to cut down on shader count somehow, or, at least move into enum
 Shader flatShader, postShader, occlusionShader, depthShader, screenShader, radialShader, 
-    bloomShader, skyboxShader, grassShader, depthFoliageShader;
+    bloomShader, skyboxShader, grassShader, depthFoliageShader, screenPosShader;
 
 Camera* camera;
 float mouseX;
 float mouseY;
 bool mouseSet;
+bool mouseJustPressed;
+float mouseXPrev;
+float mouseYPrev;
 float worldTime = 0;
 
 mat4 lightViewMatrix;
@@ -91,6 +101,7 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+
     PrintLog("Initializing shaders");
     // Shaders
     if (!compileShaders())
@@ -102,8 +113,58 @@ int main(int argc, char *argv[])
     PrintLog("Generating buffers");
     genBuffers(bufferCount, VBOs, VAOs, EBOs, quadVBO);
 
-    PrintLog("Generating textures");
-    genTextures();
+    // Textures that are drawn to
+    unsigned int designTexture;
+    glGenTextures(1, &designTexture);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, designTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    for (int i = 0; i < designImageCount; i++)
+        designImages[i] = generateEmpty(SCREEN_WIDTH, SCREEN_HEIGHT);
+  
+    // Skipping design stage
+    if (DebugActive(DEBUG_SKIP_DESIGN) || designImageCount <= 0) 
+    {
+        inDesignStage = false;
+    }
+
+    // // MARK: Design stage
+    PrintLog("Entering design stage");
+    glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    glfwSetCursorPos(window, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+    while(!glfwWindowShouldClose(window))
+    {
+        processInput(window);
+        if (!inDesignStage)
+            break;
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+        glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
+
+        currentImage = designImages[currentDesignStage];
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, currentImage.width, currentImage.height,
+            0, GL_RGBA, GL_UNSIGNED_BYTE, currentImage.data);
+        glBindTexture(GL_TEXTURE_2D, designTexture);
+
+        // Draw texture to screen
+        screenShader.setActive();
+        screenShader.setUniform("screenTex", 0);
+        renderScreenQuad(screenShader);
+
+        // Drawing mouse
+        screenPosShader.setActive();
+        screenPosShader.setUniform("baseColor", vec3(0, 0, 0));
+        screenPosShader.setUniform("offset", vec2(mouseX, 
+            SCREEN_HEIGHT-mouseY) / vec2(SCREEN_WIDTH, SCREEN_HEIGHT) * 2.f - 1.f);
+        
+        renderScreenQuad(screenPosShader);
+        
+        glfwSwapBuffers(window);
+        glfwPollEvents(); 
+    }
 
     PrintLog("Generating models");
 
@@ -120,6 +181,10 @@ int main(int argc, char *argv[])
     // Individual models
     if (!genModels(VBOs, EBOs))
         return -1;
+
+    // The rest of this depends on design input
+    PrintLog("Generating textures");
+    genTextures();
 
     PrintLog("Creating camera");
     // Create camera
@@ -156,7 +221,7 @@ int main(int argc, char *argv[])
     float prevFrame = static_cast<float>(glfwGetTime());
     bool shouldRender = true;
 
-    // Precalculate maps that don't change
+    // Precalculate maps that don't change (shadowmap)
     precalc();
 
     PrintLog("Beginning Render Loop");
@@ -460,8 +525,61 @@ void bindTexture(TextureBuffer buffer)
 
 void processInput(GLFWwindow* window)
 {
+    if (inDesignStage)
+    {
+        if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_1) == GLFW_PRESS)
+        {
+            int brushSize = 35;
+
+            float mouseStroke = 0;
+            vec2 strokeDir;
+            if (mouseJustPressed) // Catching frameskips
+            {
+                mouseStroke = length(vec2(mouseX - mouseXPrev, mouseY - mouseYPrev));
+                strokeDir = vec2(mouseXPrev - mouseX, mouseYPrev - mouseY) / mouseStroke;
+            }
+
+            //if (mouseX >= 0 && mouseX < SCREEN_WIDTH && mouseY >= 0 && mouseY < SCREEN_HEIGHT)            
+
+            for (int step = 0; step <= mouseStroke; step+= brushSize / 2)
+            {
+                float posX = mouseX + strokeDir.x * step;
+                float posY = mouseY + strokeDir.y * step;
+                for (int i = -brushSize; i < brushSize; i++)
+                {
+                    for (int j = -brushSize; j < brushSize; j++)
+                        setColor(currentImage, SCREEN_HEIGHT - posY + j, posX + i, 0, 0, 0);
+                }
+            }
+
+            mouseJustPressed = true;
+        }
+        else
+        {
+            mouseJustPressed = false;
+        }
+
+        if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS)
+        {
+            if (!exitKeyHeld)
+            {
+                currentDesignStage++;
+                if (currentDesignStage >= designImageCount)
+                { 
+                    PrintLog("Exited design stage");
+                    inDesignStage = false;
+                }
+                glfwSetCursorPos(window, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+                exitKeyHeld = true;
+            }
+        }
+        else
+        {
+            exitKeyHeld = false;
+        }
+    }
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-        glfwSetWindowShouldClose(window, true);
+            glfwSetWindowShouldClose(window, true);
 }
 
 void mouseCallback(GLFWwindow* window, double xPosD, double yPosD)
@@ -480,10 +598,18 @@ void mouseCallback(GLFWwindow* window, double xPosD, double yPosD)
     float xChange = xPos - mouseX;
     float yChange = mouseY - yPos;
 
+    mouseXPrev = mouseX;
+    mouseYPrev = mouseY;
     mouseX = xPos;
     mouseY = yPos;
 
-    camera->ProcessMouse(xChange, yChange);
+    if (inDesignStage)
+    {
+    }
+    else
+    {
+        camera->ProcessMouse(xChange, yChange);
+    }
 }
 
 // MARK: Init
@@ -531,8 +657,8 @@ bool compileShaders()
     bloomShader = Shader("shaders/postprocess/screenShader.vs", "shaders/postprocess/bloomShader.fs", "bloom shader");
     skyboxShader = Shader("shaders/horizon/skyboxShader.vs", "shaders/horizon/skyboxShader.fs", "skybox shader");
     grassShader = Shader("shaders/foliage/grassShader.vs", "shaders/foliage/grassShader.fs", "grass shader");
+    screenPosShader = Shader("shaders/postprocess/screenPosShader.vs", "shaders/base/colorShader.fs", "screen pos shader");
     
-
     return flatShader.shadersValid;
 }
 
@@ -703,8 +829,10 @@ unsigned int bindBuffer(int bufferIndex, unsigned int (&VBOs)[], unsigned int (&
 // TODO: Take in extra input
 unsigned int genModels(unsigned int (&VBOs)[], unsigned int (&EBOs)[])
 {
+    // TODO: This crashes randomly?
     for (int i = 0; i < bufferCount; i++)
     {
+        PrintLog("Generating model " + to_string(i));
         // TODO: Do I need to be worred about gc?
         vector<float> vertices;
         vector<int> indices;
@@ -712,7 +840,8 @@ unsigned int genModels(unsigned int (&VBOs)[], unsigned int (&EBOs)[])
         ModelData modelData;
 
         vector<mat4> instanceData;
-        if (!createModel(i, vertices, indices, modelData, triangleCount, instanceData))
+        if (!createModel(i, vertices, indices, modelData, triangleCount, instanceData,
+            designImages, DebugActive(DEBUG_SKIP_DESIGN) ? 0 : designImageCount))
         {
             cerr << "Error when generating model " << i << endl;
             return 0;
@@ -764,7 +893,7 @@ void framebufferSizeCallback(GLFWwindow* window, int newWidth, int newHeight)
 unsigned int handleArgs(int argc, char*argv[])
 {
     int c;
-    while ((c = getopt(argc, argv, "nfchvl")) != -1) {
+    while ((c = getopt(argc, argv, "nfchvld")) != -1) {
         switch (c) {
             case 'n': 
                 SetDebug(DEBUG_DRAW_NORMS);
@@ -780,6 +909,9 @@ unsigned int handleArgs(int argc, char*argv[])
                 break;
             case 'l':
                 SetDebug(DEBUG_DRAW_LIGHTRAYS);
+                break;
+            case 'd':
+                SetDebug(DEBUG_SKIP_DESIGN);
                 break;
             // TODO: Command line argument to set framerate
             case 'h':
@@ -803,4 +935,5 @@ void displayHelp()
     cout << "      -l draw lightrays render" << endl;
     cout << "      -f enable framerate debug" << endl;
     cout << "      -c enable full camera control" << endl;
+    cout << "      -d skip design step" << endl;
 }
