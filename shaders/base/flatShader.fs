@@ -80,12 +80,12 @@ void main()
     float diffuseCoef = diff;
 
     // Specular lighting
-    float specStrength = 0.0; // TODO: control externally; maybe pass in a vec3
+    float specStrength = 0.2; // TODO: control externally; maybe pass in a vec3
     float specCoef = 0.0;
     if (specStrength > 0)
     {
         vec3 camDir = normalize(camPos - fragPos);
-        vec3 reflectDir = reflect(-lightDir, norm);  
+        vec3 reflectDir = reflect(lightDir, norm);  
         float spec = pow(max(dot(camDir, reflectDir), 0.0), 32);
         specCoef = specStrength * spec;  
     }  

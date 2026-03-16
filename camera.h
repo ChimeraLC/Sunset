@@ -17,6 +17,11 @@ class Camera {
         virtual void ProcessMouse(float xOffset, float yOffset) { 
             (void) xOffset; (void) yOffset; }
 
+        virtual vec3 GetPosition()
+        {
+            return position;
+        }
+
     protected:
         vec3 position;
         vec3 worldUp;

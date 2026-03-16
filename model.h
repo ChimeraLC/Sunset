@@ -9,6 +9,7 @@ enum ModelType {
 	MODEL_LIGHTSOURCE = 0x02,
 	MODEL_SKYBOX = 0x04,
 	MODEL_FOLIAGE = 0x08,
+	MODEL_SKY = 0x10,
 };
 
 enum Models {
@@ -18,6 +19,7 @@ enum Models {
 	MODELTYPE_TRUNK,
 	MODELTYPE_GRASS,
 	MODELTYPE_LEAVES,
+	MODELTYPE_SKY,
 	MODEL_COUNT
 };
 
@@ -43,6 +45,8 @@ void fillVertexNormals(std::vector<float> const& preVertices,
 void createModelGround(std::vector<float>& vertices, std::vector<int>& indices, 
 	ModelData& modelData, int& triangleCount);
 void createModelSkybox(std::vector<float>& vertices, std::vector<int>& indices, 
+	ModelData& modelData, int& triangleCount);
+void createModelSky(std::vector<float>& vertices, std::vector<int>& indices, 
 	ModelData& modelData, int& triangleCount);
 void createModelSun(std::vector<float>& vertices, std::vector<int>& indices, 
 	ModelData& modelData, int& triangleCount);

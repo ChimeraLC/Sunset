@@ -42,7 +42,8 @@ mat4 sunTransform = mat4(1.0);
 float sunShadowDist = 4;    // Distance shadowmap is rendered from
 float sunRenderDist = 15;   // Distance sun model is rendered
 
-vec3 sunColor = vec3(0.9f, 0.30f, 0.35f);
+vec3 sunColor;
+vec3 lightColor;
 
 // Global values
 const int bufferCount = MODEL_COUNT;
@@ -51,7 +52,7 @@ unsigned int quadVAO;
 vector<int> triangleCounts;
 vector<ModelData> modelDatas;
 
-unsigned int skyTexture;
+unsigned int skyTexture, cloudTexture;
 Image currentImage;
 const int designImageCount = 2;
 // First texture decides clouds/stars and tree. second texture decides grass and day/night
@@ -63,7 +64,7 @@ bool exitKeyHeld = false;
 
 // TODO: Really need to cut down on shader count somehow, or, at least move into enum
 Shader flatShader, postShader, occlusionShader, depthShader, screenShader, radialShader, 
-    bloomShader, skyboxShader, grassShader, depthFoliageShader, screenPosShader;
+    bloomShader, skyboxShader, skyShader, grassShader, depthFoliageShader, screenPosShader;
 
 Camera* camera;
 float mouseX;
@@ -174,9 +175,11 @@ int main(int argc, char *argv[])
     sunTransform = mat4(1.0f);
     // Sun is visually lower than the actual lightsource TODO: Fix sun position
     vec3 sunPosition = sunDirection * sunRenderDist;
-    sunPosition.y = 0.5f;
+    sunPosition.y = 1.f;
     sunTransform = translate(sunTransform, sunPosition);
     sunTransform *= inverse(lookAt(lightDirection, sunDirection, WORLD_UP));
+
+    float windSpeed = 100 + randFloat() * 200;
 
     // Individual models
     if (!genModels(VBOs, EBOs))
@@ -185,6 +188,9 @@ int main(int argc, char *argv[])
     // The rest of this depends on design input
     PrintLog("Generating textures");
     genTextures();
+
+    lightColor = getTime() == NIGHT ? vec3(0.9f, 0.9f, 0.9f) : vec3(1.0f, 0.35f, 0.4f);
+    sunColor = getTime() == NIGHT ? vec3(0.9f, 0.75f, 0.78f) : vec3(0.9f, 0.7f, 0.7f);
 
     PrintLog("Creating camera");
     // Create camera
@@ -328,11 +334,12 @@ int main(int argc, char *argv[])
             
             if (DebugActive(DEBUG_DRAW_LIGHTRAYS))
             {
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
                 // Screen shader
                 screenShader.setActive();
-                screenShader.setUniform("screenTex", DEPTH_MAP_RT);
+                screenShader.setUniform("screenTex", LIGHTRAYS_MAP);
                 renderScreenQuad(screenShader);
             }
             else
@@ -364,12 +371,27 @@ int main(int argc, char *argv[])
 
                 glDepthMask(GL_FALSE); // TODO: Render last?
                 skyboxShader.setActive();
+                skyboxShader.setUniform("lightraysTex", LIGHTRAYS_MAP);
                 skyboxShader.setUniform("occlusionRendering", false);
-                render(skyboxShader, 0, MODEL_SKYBOX);
+                render(skyboxShader, RENDER_COLOR, MODEL_SKYBOX);
+
+                glEnable(GL_BLEND); // Clouds are only transparent thing
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);  
+                glActiveTexture(GL_TEXTURE1 + FRAMEBUFFER_COUNT); // TODO: non-fb tex enum
+                glBindTexture(GL_TEXTURE_2D, cloudTexture);
+                skyShader.setActive();
+                skyShader.setUniform("wind", windSpeed);
+                skyShader.setUniform("skyTex", FRAMEBUFFER_COUNT + 1);
+                skyShader.setUniform("lightraysTex", LIGHTRAYS_MAP);
+                skyShader.setUniform("projection", projection);
+                skyShader.setUniform("view", viewNoPosition);
+                render(skyShader, TIME_DEPENDENT | RENDER_COLOR, MODEL_SKY);
                 glDepthMask(GL_TRUE);
+                glDisable(GL_BLEND);
 
                 //Main render
                 flatShader.setActive();
+                flatShader.setUniform("camPos", camera->GetPosition());
                 flatShader.setUniform("shadowMap", DEPTH_MAP_PRE);
                 flatShader.setUniform("shadowMapRT", DEPTH_MAP_RT);
                 flatShader.setUniform("lightraysTex", LIGHTRAYS_MAP);
@@ -467,7 +489,7 @@ void render(Shader shader, unsigned int renderflags, unsigned int drawflags)
         if (renderflags & RENDER_COLOR)
         {
             shader.setUniform("baseColor", modelData.color);
-            shader.setUniform("lightColor", vec3(1.0f, 0.75f, 0.75f));
+            shader.setUniform("lightColor", lightColor);
         }
 
         if (renderflags & CULL_DISABLED)
@@ -658,6 +680,7 @@ bool compileShaders()
     skyboxShader = Shader("shaders/horizon/skyboxShader.vs", "shaders/horizon/skyboxShader.fs", "skybox shader");
     grassShader = Shader("shaders/foliage/grassShader.vs", "shaders/foliage/grassShader.fs", "grass shader");
     screenPosShader = Shader("shaders/postprocess/screenPosShader.vs", "shaders/base/colorShader.fs", "screen pos shader");
+    skyShader = Shader("shaders/horizon/skyShader.vs", "shaders/horizon/skyShader.fs", "sky shader");
     
     return flatShader.shadersValid;
 }
@@ -776,6 +799,19 @@ unsigned int genTextures()
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
 
+    Image cloudImage = generatePerlin(2048);
+
+    glGenTextures(1, &cloudTexture);
+    glBindTexture(GL_TEXTURE_2D, cloudTexture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, cloudImage.width, cloudImage.height,
+        0, GL_RGBA, GL_UNSIGNED_BYTE, cloudImage.data);
+
+    deleteImage(cloudImage);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT); 
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT); 
     return 1;
 }
 

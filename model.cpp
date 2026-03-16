@@ -25,6 +25,9 @@ unsigned int createModel(int index, vector<float>& vertices, vector<int>& indice
         case MODELTYPE_SKYBOX:
             createModelSkybox(vertices, indices, modelData, triangleCount);
             break;
+        case MODELTYPE_SKY:
+            createModelSky(vertices, indices, modelData, triangleCount);
+            break;
         case MODELTYPE_GROUND:
             createModelGround(vertices, indices, modelData, triangleCount);
             break;
@@ -43,10 +46,6 @@ unsigned int createModel(int index, vector<float>& vertices, vector<int>& indice
             return 0;
     }
     return 1;
-}
-
-float randFloat() {
-    return ((float) rand()) / RAND_MAX;    
 }
 
 void fillVertexNormals(vector<float> const& preVertices, 
@@ -224,6 +223,26 @@ void createModelSkybox(vector<float>& vertices, vector<int>& indices,
 
     fillVertexNormals(preVertices, preIndices, vertices, indices, triangleCount);
 }
+void createModelSky(vector<float>& vertices, vector<int>& indices, 
+    ModelData& modelData, int& triangleCount) {
+        
+    modelData.modelType |= MODEL_SKY;
+
+    vector<float> preVertices = {
+        -2, 0.3, -2,
+        -2, 0.3, 2,
+        2, 0.3, -2,
+        2, 0.3, 2
+    };
+
+    vector<int> preIndices = {
+            0, 2, 3,
+            0, 3, 1,
+        };
+
+    fillVertexNormals(preVertices, preIndices, vertices, indices, triangleCount);
+    modelData.color = vec3(0.965, 0.965, 0.965);
+}
 
 void createModelGrass(vector<float>& vertices, vector<int>& indices, 
     ModelData& modelData, int& triangleCount, std::vector<glm::mat4>& instanceData,
@@ -282,9 +301,10 @@ void createModelGrass(vector<float>& vertices, vector<int>& indices,
             }
         }
         // Day night dependent on second texture
-        if (count > frequency * frequency * 0.7f)
+        if (count > frequency * frequency * 1.75f)
+        {
             setTime(NIGHT);
-
+        }
         modelData.instanceCount = count;
 
     }
@@ -604,7 +624,7 @@ vec3 treeNewDirection(vec3 inDirection, vec3 startPoint, vec2 endPoint)
     float branchLength = length(newPoint - startPoint);
 
     float bump = randFloat() - 0.5f;
-    newPoint.z += (inDirection.z / 2 + bump) * branchLength;
+    newPoint.z += (inDirection.z / 4 + bump) * branchLength;
     return newPoint;
 }
 
@@ -705,9 +725,16 @@ void createModelSubtree(vec3 startPoint, vec3 inDirection, int startIndex, vecto
     }
 }
 
+int samples = 1; // tracking how vertically noisy the tex is
+int swaps;
+int hitSamples = 0;
+float sampleRate = 0.05f;
+
 // Starting at a position on the image, finds first image edge
-vec2 sampleRow(Image image, vec2 startPos, bool goingRight, bool& found, float sampleRate = 0.05f)
+vec2 sampleRow(Image image, vec2 startPos, bool goingRight, bool& found)
 {
+    vec2 returnPos = vec2(0);
+    samples += 1;
     int col = getColor(image, startPos.y * image.height, startPos.x * image.width).r;
     for (int i = 1; i < 1 / sampleRate; i++)
     {
@@ -715,14 +742,22 @@ vec2 sampleRow(Image image, vec2 startPos, bool goingRight, bool& found, float s
         if (startPos.x > 1) startPos.x -= 1;
         if (startPos.x < 0) startPos.x += 1;
 
-        if (getColor(image, startPos.y * image.height, startPos.x * image.width).r != col)
+        int newCol = getColor(image, startPos.y * image.height, startPos.x * image.width).r;
+        if (newCol != col)
         {
-            found = true;
-            return startPos;
+            swaps++;
+            newCol = col;
+            if (!found)
+            {
+                found = true;
+                returnPos = startPos;
+            }
         }
+        if (newCol < 0.5)
+            hitSamples++;
     }
     found = false;
-    return vec2(0);
+    return returnPos;
 }
 
 void createModelTrunk(vector<float>& vertices, vector<int>& indices, 
@@ -771,7 +806,22 @@ void createModelTrunk(vector<float>& vertices, vector<int>& indices,
         inputPoints = { vec2(0.2, 0.7), vec2(-0.1, 0.7), vec2(0.25, 0.65), vec2(-0.3, 0.65), vec2(-0.2, 0.6), vec2(0.2, 0.6), vec2(0, 0.3)};
     }
     
-    
+    // Set how spiky mountains are
+    float averageSwaps = (float) swaps / samples;
+    averageSwaps = glm::clamp(averageSwaps, 1.f, 8.f);
+    averageSwaps = log(averageSwaps) / log(2);
+    setMountainVariance(0.1f + 0.2f * averageSwaps / 3);
+
+    // Set cloud type
+    setCloudSeed(averageSwaps);
+    float fillProportion = hitSamples / samples * sampleRate;
+    if (fillProportion > 0.7f)
+        setCloudType(getTime() == NIGHT ? STRATUS : CLEARDAY);
+    else if (fillProportion > 0.3)
+        setCloudType(getTime() == NIGHT ? CUMULUS : STRATUS);
+    else
+        setCloudType(getTime() == NIGHT ? CLEARDAY : CUMULUS);
+
     maxHeight = inputPoints[0].y;
 
     // Sanity check
