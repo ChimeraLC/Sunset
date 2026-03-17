@@ -301,7 +301,7 @@ void createModelGrass(vector<float>& vertices, vector<int>& indices,
             }
         }
         // Day night dependent on second texture
-        if (count > frequency * frequency * 1.75f)
+        if (count > frequency * frequency * 1.0f)
         {
             setTime(NIGHT);
         }
@@ -324,7 +324,7 @@ void createModelGrass(vector<float>& vertices, vector<int>& indices,
     }
 }
 
-float leafiness = 150.f;
+float leafiness = 0;
 float maxHeight = 1.0f;
 vector<mat4> leaves;
 void createModelLeaves(vector<float>& vertices, vector<int>& indices, 
@@ -427,7 +427,7 @@ void connectTreeRings(vec3 startPoint, vec3 endPoint, int indexA, int indexB, in
         vec3 out = cross(toEnd, cross(fromCenter, baseVertex));
         // More leaves near the top, equal amounts per branch lengths, and irrespective of sidecount
         float heightFactor = ((baseVertex + endVertex) / 2.f).y / maxHeight;
-        heightFactor = clamp(2 * heightFactor - 0.5f, 0.f, 1.f);
+        heightFactor = clamp(2 * heightFactor - 0.3f, 0.f, 1.f);
         createLeaf(baseVertex, endVertex, out, heightFactor * branchLength / sides);
     }
 }
@@ -628,7 +628,7 @@ vec3 treeNewDirection(vec3 inDirection, vec3 startPoint, vec2 endPoint)
     return newPoint;
 }
 
-const int sides = 8;
+const int sides = 12;
 void createModelSubtree(vec3 startPoint, vec3 inDirection, int startIndex, vector<vec2> inPoints, float radius, vector<float>& preVertices, vector<int>& preIndices,
     bool forceUnsplit = false, bool justForced = false)
 {
@@ -649,7 +649,7 @@ void createModelSubtree(vec3 startPoint, vec3 inDirection, int startIndex, vecto
         newInDirection = normalize(newInDirection);
 
         float branchLength = length(newPoint - startPoint);
-        radius *= pow(0.6f + randFloat() * 0.1f, branchLength);
+        radius *= pow(0.7f + randFloat() * 0.1f, branchLength);
 
         if (startIndex != 0)
             createTreeRing(startPoint, newInDirection, radius, sides, preVertices, startIndex);
@@ -706,8 +706,8 @@ void createModelSubtree(vec3 startPoint, vec3 inDirection, int startIndex, vecto
             radius *= 0.6f; // Radius reduced significantly on branching
             float branchLengthLeft = length(newPointLeft - startPoint);
             float branchLengthRight = length(newPointRight - startPoint);
-            float radiusLeft = radius * pow(0.6f + randFloat() * 0.15f, branchLengthLeft);
-            float radiusRight = radius * pow(0.6f + randFloat() * 0.15f, branchLengthRight);
+            float radiusLeft = radius * pow(0.8f + randFloat() * 0.15f, branchLengthLeft);
+            float radiusRight = radius * pow(0.8f + randFloat() * 0.15f, branchLengthRight);
 
             int indexL = createTreeRing(newPointLeft, newPointLeft-startPoint, 
                     radiusLeft, sides, preVertices);
@@ -746,7 +746,7 @@ vec2 sampleRow(Image image, vec2 startPos, bool goingRight, bool& found)
         if (newCol != col)
         {
             swaps++;
-            newCol = col;
+            col = newCol;
             if (!found)
             {
                 found = true;
@@ -756,7 +756,6 @@ vec2 sampleRow(Image image, vec2 startPos, bool goingRight, bool& found)
         if (newCol < 0.5)
             hitSamples++;
     }
-    found = false;
     return returnPos;
 }
 
@@ -778,7 +777,7 @@ void createModelTrunk(vector<float>& vertices, vector<int>& indices,
     // Ordered from highest to lowest. z will be random~ish
     vector<vec2> inputPoints;
     bool everFoundPoint = false;
-    float stepSize = 0.025f;
+    float stepSize = 0.075f;
     if (designTexture.data != nullptr)
     {
         for (float i = 0.9f; i >= 0.025f; i -= stepSize)
@@ -793,6 +792,7 @@ void createModelTrunk(vector<float>& vertices, vector<int>& indices,
                 everFoundPoint = true;
                 vec2 newPoint = foundPoint - vec2(0.5f, 0);
                 newPoint.x = sign(newPoint.x) * glm::min(i * 1.f, abs(newPoint.x));
+                newPoint.x = -newPoint.x;
                 inputPoints.push_back(newPoint);
             }
             if (everFoundPoint)
@@ -812,12 +812,16 @@ void createModelTrunk(vector<float>& vertices, vector<int>& indices,
     averageSwaps = log(averageSwaps) / log(2);
     setMountainVariance(0.1f + 0.2f * averageSwaps / 3);
 
+    // Set leafiness
+    leafiness = randFloat() * 300 + 50;
+    if (leafiness < 100) leafiness = 0;
+
     // Set cloud type
     setCloudSeed(averageSwaps);
     float fillProportion = hitSamples / samples * sampleRate;
-    if (fillProportion > 0.7f)
+    if (fillProportion > 0.6f)
         setCloudType(getTime() == NIGHT ? STRATUS : CLEARDAY);
-    else if (fillProportion > 0.3)
+    else if (fillProportion > 0.25)
         setCloudType(getTime() == NIGHT ? CUMULUS : STRATUS);
     else
         setCloudType(getTime() == NIGHT ? CLEARDAY : CUMULUS);

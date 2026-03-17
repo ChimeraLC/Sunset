@@ -73,7 +73,7 @@ void main()
     float intensity = texture(lightraysTex, screenPos).r;
 
     // Ambient lighting (+ artificial backlighting)
-    float ambientCoef = 0.25 * (0.25 + 4 * intensity + (1 + dot(norm, lightTowards)) / 2);
+    float ambientCoef = 0.25 * (0.25 + 8 * intensity + (1 + dot(norm, lightTowards)) / 2);
     
     float diff = max(dot(norm, lightTowards), 0);
     

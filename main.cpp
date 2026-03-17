@@ -196,7 +196,7 @@ int main(int argc, char *argv[])
     // Create camera
     if (DebugActive(DEBUG_FREEHAND_CAMERA))
     {
-        FreeCamera* freeCamera = new FreeCamera(vec3(-2, 0.2f, 0), 0, 0);
+        FreeCamera* freeCamera = new FreeCamera(vec3(-0.9, 0.1f, -1.5), 0.8f, 0.1f);
         freeCamera->SetXBound(vec2(-2, 2));
         freeCamera->SetZBound(vec2(-2, 2));
         freeCamera->SetYBound(vec2(0.1, 2));
@@ -204,7 +204,9 @@ int main(int argc, char *argv[])
     }
     else
     {
-        camera = new FixedCamera(0.2, 2, 2.5);
+        FixedCamera* fixedCamera = new FixedCamera(0.2, 2, 2.5);
+        fixedCamera->SetTarget(vec3(0.0, 0.3, 0.0));
+        camera = fixedCamera;
     }
 
     // TODO: Calculate close and far planes based on model and sun
