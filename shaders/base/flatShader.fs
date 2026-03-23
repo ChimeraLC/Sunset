@@ -10,6 +10,7 @@ uniform sampler2D shadowMap;
 uniform sampler2D shadowMapRT;
 uniform sampler2D lightraysTex;
 
+uniform vec2 screenSize;
 uniform vec3 baseColor;
 uniform vec3 lightColor;
 uniform vec3 lightDir;
@@ -63,7 +64,7 @@ float shadowCalc(vec3 inFragLightPos, vec3 norm)
 
 void main()
 {
-    vec2 screenPos = gl_FragCoord.xy / vec2(1920, 1080);
+    vec2 screenPos = gl_FragCoord.xy / screenSize;
 
     // Diffuse lighting TODO: Assert always pre-normalized if not scaling? reduce computation
     vec3 norm = normalize(normal);

@@ -37,7 +37,7 @@ const int SHADOW_RT_DOWNSCALE = 4;
 
 const float COLOR_WHITE[] = {1.0, 1.0, 1.0, 1.0};
 const float COLOR_BLACK[] = {0.0, 0.0, 0.0, 1.0};
-vec3 sunDirection = vec3(0, 1, 0);
+vec3 sunDirection, sunPosition;
 mat4 sunTransform = mat4(1.0);
 float sunShadowDist = 4;    // Distance shadowmap is rendered from
 float sunRenderDist = 15;   // Distance sun model is rendered
@@ -52,13 +52,20 @@ unsigned int quadVAO;
 vector<int> triangleCounts;
 vector<ModelData> modelDatas;
 
+// Skybox and cloads
 unsigned int skyTexture, cloudTexture;
+
+// Images drawn to during design stage
 Image currentImage;
 const int designImageCount = 2;
-// First texture decides clouds/stars and tree. second texture decides grass and day/night
 Image designImages[designImageCount];
 bool inDesignStage = true;
 int currentDesignStage = 0;
+const float BRUSH_SIZE = 35;
+
+// How long without input progresses the drawing
+const float INACTIVE_CUTOFF = 5.0f;
+float timeSinceInput = 0; 
 const unsigned int DESIGN_EXIT_KEY = GLFW_KEY_R;
 bool exitKeyHeld = false;
 
@@ -108,11 +115,17 @@ int main(int argc, char *argv[])
     if (!compileShaders())
         return -1;
 
-    // TODO: How is buffer count generated?
+    // Buffers
     unsigned int VBOs[bufferCount], EBOs[bufferCount], quadVBO;
 
     PrintLog("Generating buffers");
     genBuffers(bufferCount, VBOs, VAOs, EBOs, quadVBO);
+
+    // Framerate calculations
+    float accumTime = 0.0f;
+    float deltaTime = 0.0f;
+    float prevFrame = static_cast<float>(glfwGetTime());
+    bool shouldRender = true;
 
     // Textures that are drawn to
     unsigned int designTexture;
@@ -131,13 +144,18 @@ int main(int argc, char *argv[])
         inDesignStage = false;
     }
 
-    // // MARK: Design stage
+    // MARK: Design stage
     PrintLog("Entering design stage");
     glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
     glfwSetCursorPos(window, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
     while(!glfwWindowShouldClose(window))
     {
-        processInput(window);
+        // Don't need framerate assurance during drawing
+        float currentTime = static_cast<float>(glfwGetTime());
+        deltaTime = currentTime - prevFrame;
+        prevFrame = currentTime;
+
+        processInput(window, deltaTime);
         if (!inDesignStage)
             break;
 
@@ -169,32 +187,22 @@ int main(int argc, char *argv[])
 
     PrintLog("Generating models");
 
-    // Generic scene info
-    sunDirection = normalize(vec3(3, 2, 4));
-    vec3 lightDirection = -sunDirection;
-    sunTransform = mat4(1.0f);
-    // Sun is visually lower than the actual lightsource TODO: Fix sun position
-    vec3 sunPosition = sunDirection * sunRenderDist;
-    sunPosition.y = 1.f;
-    sunTransform = translate(sunTransform, sunPosition);
-    sunTransform *= inverse(lookAt(lightDirection, sunDirection, WORLD_UP));
-
-    float windSpeed = 100 + randFloat() * 200;
-
     // Individual models
     if (!genModels(VBOs, EBOs))
         return -1;
 
-    // The rest of this depends on design input
     PrintLog("Generating textures");
     genTextures();
 
-    lightColor = getTime() == NIGHT ? vec3(0.9f, 0.9f, 0.9f) : vec3(1.0f, 0.35f, 0.4f);
-    sunColor = getTime() == NIGHT ? vec3(0.9f, 0.75f, 0.78f) : vec3(0.9f, 0.7f, 0.7f);
-
     PrintLog("Creating camera");
     // Create camera
-    if (DebugActive(DEBUG_FREEHAND_CAMERA))
+    if (DebugActive(DEBUG_FIXED_CAMERA))
+    {
+        FixedCamera* fixedCamera = new FixedCamera(0.2, 2, 2.5);
+        fixedCamera->SetTarget(vec3(0.0, 0.3, 0.0));
+        camera = fixedCamera;
+    }
+    else
     {
         FreeCamera* freeCamera = new FreeCamera(vec3(-0.9, 0.1f, -1.5), 0.8f, 0.1f);
         freeCamera->SetXBound(vec2(-2, 2));
@@ -202,35 +210,14 @@ int main(int argc, char *argv[])
         freeCamera->SetYBound(vec2(0.1, 2));
         camera = freeCamera;
     }
-    else
-    {
-        FixedCamera* fixedCamera = new FixedCamera(0.2, 2, 2.5);
-        fixedCamera->SetTarget(vec3(0.0, 0.3, 0.0));
-        camera = fixedCamera;
-    }
-
-    // TODO: Calculate close and far planes based on model and sun
-    float nearPlane = 1.f, farPlane = 10.0f;
-
-    // Light view matrix (currently, this doesn't change)
-    mat4 lightProjection, lightView;
-    lightProjection = ortho(-3.0f, 3.0f, -1.0f, 1.0f, nearPlane, farPlane);
-    lightView = lookAt(sunDirection * sunShadowDist, vec3(0.0f), vec3(0.0, 1.0, 0.0));
-    lightViewMatrix = lightProjection * lightView;
 
     // Set settings
     glEnable(GL_DEPTH_TEST);  
     glEnable(GL_CULL_FACE);  
     glCullFace(GL_BACK);
 
-    // Framerate calculations
-    float accumTime = 0.0f;
-    float deltaTime = 0.0f;
-    float prevFrame = static_cast<float>(glfwGetTime());
-    bool shouldRender = true;
-
-    // Precalculate maps that don't change (shadowmap)
-    precalc();
+    // Precalculate maps that don't change (shadowmap) and other values
+    preAssign();
 
     PrintLog("Beginning Render Loop");
     // MARK: Render loop
@@ -264,7 +251,7 @@ int main(int argc, char *argv[])
         {
             shouldRender = false;
             // Process inputs
-            processInput(window);
+            processInput(window, deltaTime);
             camera->ProcessInput(window, deltaTime);
 
             // TODO: Low res foliage
@@ -274,7 +261,6 @@ int main(int argc, char *argv[])
             glClear(GL_DEPTH_BUFFER_BIT);
 
             depthFoliageShader.setActive();
-            depthFoliageShader.setUniform("lightView", lightViewMatrix);
             render(depthFoliageShader, INSTANCED | TIME_DEPENDENT | CULL_DISABLED, MODEL_FOLIAGE);
         
             bindTexture(DEPTH_MAP_RT);
@@ -316,7 +302,6 @@ int main(int argc, char *argv[])
             glActiveTexture(GL_TEXTURE0 + FRAMEBUFFER_COUNT); // TODO: non-fb tex enum
             glBindTexture(GL_TEXTURE_CUBE_MAP, skyTexture);
             skyboxShader.setActive();
-            skyboxShader.setUniform("skyboxTex", FRAMEBUFFER_COUNT);
             skyboxShader.setUniform("projection", projection);
             skyboxShader.setUniform("view", viewNoPosition);
             skyboxShader.setUniform("occlusionRendering", true);
@@ -328,7 +313,6 @@ int main(int argc, char *argv[])
             glClearColor(COLOR_BLACK[0], COLOR_BLACK[1], COLOR_BLACK[2], COLOR_BLACK[3]);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
             radialShader.setActive();
-            radialShader.setUniform("screenTex", OCCLUSION_MAP);
             radialShader.setUniform("lightScreenPos", sunScreenPos);
             renderScreenQuad(radialShader);
                     
@@ -350,7 +334,6 @@ int main(int argc, char *argv[])
                 bindFramebuffer(TEMPORARY_A);
                 glClear(GL_COLOR_BUFFER_BIT);
                 bloomShader.setActive();
-                bloomShader.setUniform("occlusionTex", OCCLUSION_MAP);
                 bloomShader.setUniform("screenTex", OCCLUSION_MAP);
                 bloomShader.setUniform("stage", 0);
                 renderScreenQuad(bloomShader);
@@ -371,20 +354,16 @@ int main(int argc, char *argv[])
                 bindFramebuffer(POSTPROCESS);
                 glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-                glDepthMask(GL_FALSE); // TODO: Render last?
+                glDepthMask(GL_FALSE);
                 skyboxShader.setActive();
-                skyboxShader.setUniform("lightraysTex", LIGHTRAYS_MAP);
                 skyboxShader.setUniform("occlusionRendering", false);
                 render(skyboxShader, RENDER_COLOR, MODEL_SKYBOX);
 
-                glEnable(GL_BLEND); // Clouds are only transparent thing
+                glEnable(GL_BLEND); // Clouds are only shader with alpha blending
                 glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);  
                 glActiveTexture(GL_TEXTURE1 + FRAMEBUFFER_COUNT); // TODO: non-fb tex enum
                 glBindTexture(GL_TEXTURE_2D, cloudTexture);
                 skyShader.setActive();
-                skyShader.setUniform("wind", windSpeed);
-                skyShader.setUniform("skyTex", FRAMEBUFFER_COUNT + 1);
-                skyShader.setUniform("lightraysTex", LIGHTRAYS_MAP);
                 skyShader.setUniform("projection", projection);
                 skyShader.setUniform("view", viewNoPosition);
                 render(skyShader, TIME_DEPENDENT | RENDER_COLOR, MODEL_SKY);
@@ -394,11 +373,6 @@ int main(int argc, char *argv[])
                 //Main render
                 flatShader.setActive();
                 flatShader.setUniform("camPos", camera->GetPosition());
-                flatShader.setUniform("shadowMap", DEPTH_MAP_PRE);
-                flatShader.setUniform("shadowMapRT", DEPTH_MAP_RT);
-                flatShader.setUniform("lightraysTex", LIGHTRAYS_MAP);
-                flatShader.setUniform("lightView", lightViewMatrix);
-                flatShader.setUniform("lightDir", lightDirection);
                 
                 // Projection / view
                 flatShader.setUniform("projection", projection);
@@ -408,11 +382,6 @@ int main(int argc, char *argv[])
 
                 // Folliage
                 grassShader.setActive();
-                grassShader.setUniform("shadowMap", DEPTH_MAP_PRE);
-                grassShader.setUniform("shadowMapRT", DEPTH_MAP_RT);
-                grassShader.setUniform("lightraysTex", LIGHTRAYS_MAP);
-                grassShader.setUniform("lightView", lightViewMatrix);
-                grassShader.setUniform("lightDir", lightDirection);
                 grassShader.setUniform("renderOcclusion", false);
             
                 render(grassShader, TIME_DEPENDENT | CULL_DISABLED | INSTANCED |
@@ -422,11 +391,8 @@ int main(int argc, char *argv[])
 
                 glBindFramebuffer(GL_FRAMEBUFFER, 0);
                 glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-                    postShader.setActive();
-                    postShader.setUniform("screenTex", POSTPROCESS);
-                    postShader.setUniform("bloomTex", OCCLUSION_MAP);
-                    postShader.setUniform("sunColor", sunColor);
-                    renderScreenQuad(postShader);
+                postShader.setActive();
+                renderScreenQuad(postShader);
             }
             
             // Swap buffers and poll events
@@ -547,13 +513,13 @@ void bindTexture(TextureBuffer buffer)
         glBindTexture(GL_TEXTURE_2D, FTexs[buffer]);
 }
 
-void processInput(GLFWwindow* window)
+void processInput(GLFWwindow* window, float deltaTime)
 {
     if (inDesignStage)
     {
         if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_1) == GLFW_PRESS)
         {
-            int brushSize = 35;
+            timeSinceInput = 0;
 
             float mouseStroke = 0;
             vec2 strokeDir;
@@ -563,15 +529,13 @@ void processInput(GLFWwindow* window)
                 strokeDir = vec2(mouseXPrev - mouseX, mouseYPrev - mouseY) / mouseStroke;
             }
 
-            //if (mouseX >= 0 && mouseX < SCREEN_WIDTH && mouseY >= 0 && mouseY < SCREEN_HEIGHT)            
-
-            for (int step = 0; step <= mouseStroke; step+= brushSize / 2)
+            for (int step = 0; step <= mouseStroke; step+= BRUSH_SIZE / 2)
             {
                 float posX = mouseX + strokeDir.x * step;
                 float posY = mouseY + strokeDir.y * step;
-                for (int i = -brushSize; i < brushSize; i++)
+                for (int i = -BRUSH_SIZE; i < BRUSH_SIZE; i++)
                 {
-                    for (int j = -brushSize; j < brushSize; j++)
+                    for (int j = -BRUSH_SIZE; j < BRUSH_SIZE; j++)
                         setColor(currentImage, SCREEN_HEIGHT - posY + j, posX + i, 0, 0, 0);
                 }
             }
@@ -580,13 +544,15 @@ void processInput(GLFWwindow* window)
         }
         else
         {
+            timeSinceInput += deltaTime;
             mouseJustPressed = false;
         }
 
-        if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS)
+        if (glfwGetKey(window, DESIGN_EXIT_KEY) == GLFW_PRESS || timeSinceInput > INACTIVE_CUTOFF)
         {
             if (!exitKeyHeld)
             {
+                timeSinceInput = 0;
                 currentDesignStage++;
                 if (currentDesignStage >= designImageCount)
                 { 
@@ -627,10 +593,7 @@ void mouseCallback(GLFWwindow* window, double xPosD, double yPosD)
     mouseX = xPos;
     mouseY = yPos;
 
-    if (inDesignStage)
-    {
-    }
-    else
+    if (!inDesignStage)
     {
         camera->ProcessMouse(xChange, yChange);
     }
@@ -667,7 +630,6 @@ GLFWwindow* initializeAndCreateWindow(int screenWidth, int screenHeight, const c
     return window;
 }
 
-// TODO: Clean this up TT
 bool compileShaders()
 {
     flatShader = Shader("shaders/base/flatShader.vs", 
@@ -694,6 +656,7 @@ unsigned int genBuffers(int bufferCount,
     glGenVertexArrays(bufferCount, VAOs);
     glGenBuffers(bufferCount, EBOs);
 
+    // Quad buffer for screen shaders
     glGenVertexArrays(1, &quadVAO);
     glGenBuffers(1, &quadVBO);
     glBindVertexArray(quadVAO);
@@ -704,7 +667,7 @@ unsigned int genBuffers(int bufferCount,
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
 
-    // Generate all framebuffers
+    // Generate all other framebuffers
     glGenFramebuffers(FRAMEBUFFER_COUNT, FBOs);
     glGenTextures(FRAMEBUFFER_COUNT, FTexs);
 
@@ -817,6 +780,7 @@ unsigned int genTextures()
     return 1;
 }
 
+// Bind a specific model to its buffer
 unsigned int bindBuffer(int bufferIndex, unsigned int (&VBOs)[], unsigned int (&VAOs)[], 
         unsigned int (&EBOs)[], vector<float> vertices, vector<int> indices,
         bool hasInstanceData = false, vector<mat4> instanceData = {})
@@ -864,10 +828,8 @@ unsigned int bindBuffer(int bufferIndex, unsigned int (&VBOs)[], unsigned int (&
     return 1;
 }
 
-// TODO: Take in extra input
 unsigned int genModels(unsigned int (&VBOs)[], unsigned int (&EBOs)[])
 {
-    // TODO: This crashes randomly?
     for (int i = 0; i < bufferCount; i++)
     {
         PrintLog("Generating model " + to_string(i));
@@ -894,12 +856,39 @@ unsigned int genModels(unsigned int (&VBOs)[], unsigned int (&EBOs)[])
             bindBuffer(i, VBOs, VAOs, EBOs, vertices, indices);
     }
 
+    // We don't need design images anymore
+    for (int i = 0; i < (DebugActive(DEBUG_SKIP_DESIGN) ? 0 : designImageCount); i++)
+        deleteImage(designImages[i]);
 
     return 1;
 }
 
-void precalc()
+//All calculations that are done initially
+void preAssign()
 {
+    // TODO: Calculate close and far planes based on model and sun
+    float nearPlane = 1.f, farPlane = 10.0f;
+
+    // Generic scene info
+    sunDirection = normalize(vec3(3, 2, 4));
+    vec3 lightDirection = -sunDirection;
+    sunTransform = mat4(1.0f);
+    // Sun is visually lower than the actual lightsource TODO: Fix sun position
+    sunPosition = sunDirection * sunRenderDist;
+    sunPosition.y = 1.f;
+    sunTransform = translate(sunTransform, sunPosition);
+    sunTransform *= inverse(lookAt(lightDirection, sunDirection, WORLD_UP));
+    
+    lightColor = getTime() == NIGHT ? vec3(0.9f, 0.9f, 0.9f) : vec3(1.0f, 0.35f, 0.4f);
+    sunColor = getTime() == NIGHT ? vec3(0.9f, 0.75f, 0.78f) : vec3(0.9f, 0.7f, 0.7f);
+
+    // Light view matrix (currently, this doesn't change)
+    mat4 lightProjection, lightView;
+    lightProjection = ortho(-3.0f, 3.0f, -1.0f, 1.0f, nearPlane, farPlane);
+    lightView = lookAt(sunDirection * sunShadowDist, vec3(0.0f), vec3(0.0, 1.0, 0.0));
+    lightViewMatrix = lightProjection * lightView;
+
+    // Get the fixed depth map
     glViewport(0, 0, SHADOW_RESOLUTION, SHADOW_RESOLUTION);
     bindFramebuffer(DEPTH_MAP_PRE);
     glClear(GL_DEPTH_BUFFER_BIT);
@@ -912,11 +901,53 @@ void precalc()
     render(depthShader, 0, MODEL_DEFAULT);
 
     bindTexture(DEPTH_MAP_PRE);
+
+    // Assigning fixed uniforms
+    vec2 screenSize = vec2(curWidth, curHeight);
+
+    depthFoliageShader.setActive();
+    depthFoliageShader.setUniform("lightView", lightViewMatrix);
+
+    skyboxShader.setActive();
+    skyboxShader.setUniform("skyboxTex", FRAMEBUFFER_COUNT);
+    skyboxShader.setUniform("lightraysTex", LIGHTRAYS_MAP);
+    skyboxShader.setUniform("screenSize", screenSize);
+
+    radialShader.setActive();
+    radialShader.setUniform("screenTex", OCCLUSION_MAP);
+
+    float windSpeed = 100 + randFloat() * 200;
+    skyShader.setActive();
+    skyShader.setUniform("wind", windSpeed);
+    skyShader.setUniform("skyTex", FRAMEBUFFER_COUNT + 1);
+    skyShader.setUniform("lightraysTex", LIGHTRAYS_MAP);
+    skyShader.setUniform("screenSize", screenSize);
+
+    flatShader.setActive();
+    flatShader.setUniform("shadowMap", DEPTH_MAP_PRE);
+    flatShader.setUniform("shadowMapRT", DEPTH_MAP_RT);
+    flatShader.setUniform("lightraysTex", LIGHTRAYS_MAP);
+    flatShader.setUniform("lightView", lightViewMatrix);
+    flatShader.setUniform("lightDir", -sunDirection);
+    flatShader.setUniform("screenSize", screenSize);
+
+    grassShader.setActive();
+    grassShader.setUniform("shadowMap", DEPTH_MAP_PRE);
+    grassShader.setUniform("shadowMapRT", DEPTH_MAP_RT);
+    grassShader.setUniform("lightraysTex", LIGHTRAYS_MAP);
+    grassShader.setUniform("lightView", lightViewMatrix);
+    grassShader.setUniform("lightDir", -sunDirection);
+    grassShader.setUniform("screenSize", screenSize);
+    
+    postShader.setActive();
+    postShader.setUniform("screenTex", POSTPROCESS);
+    postShader.setUniform("bloomTex", OCCLUSION_MAP);
+    postShader.setUniform("sunColor", sunColor);
 }
 
 void framebufferSizeCallback(GLFWwindow* window, int newWidth, int newHeight)
 {
-    // Resize TODO: UNSUPPORTED WITH FRAMEBUFFERS
+    // Resize UNSUPPORTED WITH FRAMEBUFFERS
     // curWidth = newWidth;
     // curHeight = newHeight;
     // glViewport(0, 0, curWidth, curHeight);
@@ -940,7 +971,7 @@ unsigned int handleArgs(int argc, char*argv[])
                 SetDebug(DEBUG_FRAMERATE); 
                 break;
             case 'c':
-                SetDebug(DEBUG_FREEHAND_CAMERA);
+                SetDebug(DEBUG_FIXED_CAMERA);
                 break;
             case 'v':
                 SetDebug(DEBUG_VERBOSE);
@@ -968,10 +999,11 @@ void displayHelp()
 {
     cout << "Usage: ./sunset.exe [options]" << endl;
     cout << "   options:" << endl;
+    cout << "      -h display this message" << endl;
     cout << "      -v display verbose logs" << endl;
     cout << "      -n draw normals" << endl;
     cout << "      -l draw lightrays render" << endl;
     cout << "      -f enable framerate debug" << endl;
-    cout << "      -c enable full camera control" << endl;
-    cout << "      -d skip design step" << endl;
+    cout << "      -c enable fixed rotating camera" << endl;
+    cout << "      -d use preset scenery" << endl;
 }

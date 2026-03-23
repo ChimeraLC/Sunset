@@ -5,6 +5,8 @@ in vec2 texPos;
 
 uniform sampler2D lightraysTex;
 uniform sampler2D skyTex;
+
+uniform vec2 screenSize;
 uniform vec3 lightColor;
 uniform vec3 baseColor;
 uniform float time;
@@ -26,7 +28,7 @@ void main()
         density *= 2 - disFromCenter * 4;
 
     vec3 outColor = baseColor;
-    vec2 screenPos = gl_FragCoord.xy / vec2(1920, 1080);
+    vec2 screenPos = gl_FragCoord.xy / screenSize;
     
     float intensity = texture(lightraysTex, screenPos).r;
     intensity *= 4;
@@ -34,5 +36,4 @@ void main()
 
     //fragColor = vec4(intensity * lightColor, 1);
     fragColor = vec4(outColor, density);
-    
 }

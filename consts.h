@@ -12,7 +12,6 @@ const vec3 VECTOR_ALIGN = vec3(1, 0, 0);
 const vec3 WORLD_UP = vec3(0, 1, 0);
 
 enum TIMES {
-    DAY,
     DUSK,
     NIGHT
 };

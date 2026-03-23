@@ -164,22 +164,21 @@ void createModelGround(vector<float>& vertices, vector<int>& indices,
         
     modelData.modelType |= MODEL_DEFAULT;
 
-    float groundBounds = 10.0f;
+    float groundBounds = 20.0f;
+    int groundSides = 12;
 
     vector<float> preVertices = {
             0.0, 0.0, 0.0,
-            groundBounds, 0.0f, groundBounds,
-            groundBounds, 0.0f, -groundBounds, 
-            -groundBounds, 0.0f, -groundBounds,
-            -groundBounds, 0.0f, groundBounds, 
         };
+    
+    vector<int> preIndices = {};
 
-    vector<int> preIndices = {
-            0, 1, 2,
-            0, 2, 3,
-            0, 3, 4,
-            0, 4, 1,
-        };
+    float angle = -2 * PI / groundSides;
+    for (int i = 0; i < groundSides; i++)
+    {
+        pushVertex(preVertices, groundBounds * cos(angle * i), 0, groundBounds * sin(angle * i));
+        pushIndices(preIndices, 0, 1 + i, 1 + (1 + i) % groundSides);
+    }
 
     fillVertexNormals(preVertices, preIndices, vertices, indices, triangleCount);
     modelData.color = vec3(0.0f, 0.3f, 0.0f);

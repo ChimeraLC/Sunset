@@ -33,10 +33,10 @@ enum TextureBuffer {
 void bindFramebuffer(TextureBuffer buffer);
 void bindTexture(TextureBuffer buffer);
 unsigned int genModels( unsigned int (&VBOs)[], unsigned int (&EBOs)[]);
-void precalc();
+void preAssign();
 
 // Pipeline
-void processInput(GLFWwindow* window);
+void processInput(GLFWwindow* window, float deltaTime);
 
 enum RenderFlags {
     RENDER_NORM = 0x01,

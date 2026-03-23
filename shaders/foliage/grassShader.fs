@@ -10,6 +10,7 @@ uniform sampler2D shadowMap;
 uniform sampler2D shadowMapRT;
 uniform sampler2D lightraysTex;
 
+uniform vec2 screenSize;
 uniform vec3 baseColor;
 uniform bool renderOcclusion;
 uniform vec3 lightColor;
@@ -41,7 +42,7 @@ void main()
     else
     {
         // TODO: SCREEN SIZE
-        vec2 screenPos = gl_FragCoord.xy / vec2(1920, 1080);
+        vec2 screenPos = gl_FragCoord.xy / screenSize;
         // God rays
         float intensity = texture(lightraysTex, screenPos).r;
 

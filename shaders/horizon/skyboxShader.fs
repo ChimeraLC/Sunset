@@ -5,6 +5,8 @@ in vec3 TexCoords;
 
 uniform sampler2D lightraysTex;
 uniform samplerCube skyboxTex;
+
+uniform vec2 screenSize;
 uniform vec3 lightColor;
 uniform bool occlusionRendering;
 
@@ -19,7 +21,7 @@ void main()
     }
     else
     {   
-        vec2 screenPos = gl_FragCoord.xy / vec2(1920, 1080);
+        vec2 screenPos = gl_FragCoord.xy / screenSize;
         float intensity = texture(lightraysTex, screenPos).r;
         // Apply stronger lightrays to background
         if (tex.a < 0.5)

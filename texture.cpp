@@ -89,7 +89,7 @@ Image generateSkybox(int width)
             if (timePhase == NIGHT)
                 setColor(image, i, j, skyColorHighNight, 0);
             else if (timePhase == DUSK)
-                setColor(image, i, j, (skyColorHigh + skyColorLow) / 2.0f, 0);
+                setColor(image, i, j, (2.0f * skyColorHigh + skyColorLow) / 3.0f, 0);
         }
     }
 
@@ -111,40 +111,6 @@ Image generateSkybox(int width)
             }
         }
     }
-    return image;
-}
-
-Image generatePerlin(int width)
-{
-    Image image = createImage(width, width);
-
-    initPerlin();
-
-    for (int i = 0; i < width / 2; i++)
-    {
-        for (int j = 0; j < width / 2; j++)
-        {
-            float noiseVal;
-            switch (cloudType)
-            {
-                case CUMULUS:
-                    noiseVal = getPerlin((float) i / (width / 8), (float) j / (width / 8), cloudSeed);
-                    break;
-                case STRATUS:
-                    noiseVal = getPerlin((float) i / (width / 4), (float) j / (width / 24), cloudSeed);
-                    break;
-                default:
-                    noiseVal = 0;
-            }
-            int scaledNoise = noiseVal * 192 + 128;
-            scaledNoise = clamp(scaledNoise, 0, 255);
-            setColor(image, i, j, scaledNoise, scaledNoise, scaledNoise, scaledNoise);
-            setColor(image, width - 1 - i, j, scaledNoise, scaledNoise, scaledNoise, scaledNoise);
-            setColor(image, width - 1 - i, width - 1 - j, scaledNoise, scaledNoise, scaledNoise, scaledNoise);
-            setColor(image, i, width - 1 - j, scaledNoise, scaledNoise, scaledNoise, scaledNoise);
-        }
-    }
-
     return image;
 }
 
@@ -196,7 +162,7 @@ Image generateMountain(int width)
         // TODO: Where did the math end up 1-x?
         mountainHeight = width * (abs(horizontalPos - low) * slopeDamp + lowHeight);
 
-        //std::cout << horizontalPos << " " << left << " " << right << " " << (abs(horizontalPos - low) + lowHeight) << std::endl;
+        vec3 usedHighColor = timePhase == NIGHT ? skyColorHighNight : skyColorHigh;
 
         for (int row = 0; row < width; row++)
         {
@@ -207,9 +173,13 @@ Image generateMountain(int width)
             }
             else
             {
-                float heightFrac = timePhase == NIGHT ? glm::min((float) row / width + 0.3f, 1.0f) : (float) row / width / 2;
+                float heightFrac;
+                if (timePhase == NIGHT)
+                    heightFrac = glm::min((float) row / width + 0.3f, 1.0f);
+                else
+                    heightFrac = (float) row / width / 1.5;
                 setColor(image, width - row - 1, col, 
-                    heightFrac * (timePhase == NIGHT ? skyColorHighNight : skyColorHigh) + (1 - heightFrac) * skyColorLow, 0);    
+                    heightFrac * usedHighColor + (1 - heightFrac) * skyColorLow, 0);    
             }
         }
     }
@@ -236,6 +206,41 @@ Image generateMountain(int width)
             }
         }
     }
+    return image;
+}
+
+Image generatePerlin(int width)
+{
+    Image image = createImage(width, width);
+
+    initPerlin();
+
+    for (int i = 0; i < width / 2; i++)
+    {
+        for (int j = 0; j < width / 2; j++)
+        {
+            float noiseVal;
+            switch (cloudType)
+            {
+                case CUMULUS:
+                    noiseVal = getPerlin((float) i / (width / 8), (float) j / (width / 8), cloudSeed);
+                    break;
+                case STRATUS:
+                    noiseVal = getPerlin((float) i / (width / 4), (float) j / (width / 24), cloudSeed);
+                    break;
+                default:
+                    noiseVal = 0;
+            }
+            int scaledNoise = noiseVal * 192 + 128;
+            scaledNoise = clamp(scaledNoise, 0, 255);
+            // Mirror across all four quadrants
+            setColor(image, i, j, scaledNoise, scaledNoise, scaledNoise, scaledNoise);
+            setColor(image, width - 1 - i, j, scaledNoise, scaledNoise, scaledNoise, scaledNoise);
+            setColor(image, width - 1 - i, width - 1 - j, scaledNoise, scaledNoise, scaledNoise, scaledNoise);
+            setColor(image, i, width - 1 - j, scaledNoise, scaledNoise, scaledNoise, scaledNoise);
+        }
+    }
+
     return image;
 }
 
