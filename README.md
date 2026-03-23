@@ -1,3 +1,3 @@
-OpenGL sunset renderer.
+OpenGL sunset renderer
 
 Requirements: OpenGL, GLFW, GLM
